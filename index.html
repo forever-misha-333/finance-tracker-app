@@ -570,15 +570,17 @@ function renderBreakdown(containerId, items) {
   }).join('');
 }
 
+function renderDashboard(dashboard) {
+  document.getElementById('dashboard-balance').textContent = formatMoney(dashboard.totals.balance);
+  document.getElementById('dashboard-income').textContent = formatMoney(dashboard.totals.income);
+  document.getElementById('dashboard-expense').textContent = formatMoney(dashboard.totals.expenses);
+  renderBreakdown('dashboard-expense-breakdown', dashboard.expenseByCategory);
+  renderBreakdown('dashboard-income-breakdown', dashboard.incomeByCategory);
+}
+
 function loadDashboard() {
   callServer('apiGetDashboard', state.currentPeriod, null, null)
-    .then(function (dashboard) {
-      document.getElementById('dashboard-balance').textContent = formatMoney(dashboard.totals.balance);
-      document.getElementById('dashboard-income').textContent = formatMoney(dashboard.totals.income);
-      document.getElementById('dashboard-expense').textContent = formatMoney(dashboard.totals.expenses);
-      renderBreakdown('dashboard-expense-breakdown', dashboard.expenseByCategory);
-      renderBreakdown('dashboard-income-breakdown', dashboard.incomeByCategory);
-    })
+    .then(renderDashboard)
     .catch(function (err) {
       document.getElementById('dashboard-balance').textContent = 'Ошибка';
       console.error(err);
@@ -634,17 +636,15 @@ function loadHistory() {
 }
 
 function enrichCategoryNames() {
-  Promise.all([
-    callServer('apiGetCategories', 'expense'),
-    callServer('apiGetCategories', 'income')
-  ]).then(function (results) {
-    var map = {};
-    results[0].concat(results[1]).forEach(function (c) { map[c.id] = c.name; });
-    document.querySelectorAll('#history-container .row-title').forEach(function (el) {
-      var id = el.getAttribute('data-category-id');
-      if (map[id]) el.textContent = map[id];
-    });
-  }).catch(function (err) { console.error(err); });
+  var cached = (state.categoriesCache.expense || []).concat(state.categoriesCache.income || []);
+  if (cached.length === 0) return; // кэш ещё не заполнен — имена подтянутся при следующей загрузке
+
+  var map = {};
+  cached.forEach(function (c) { map[c.id] = c.name; });
+  document.querySelectorAll('#history-container .row-title').forEach(function (el) {
+    var id = el.getAttribute('data-category-id');
+    if (map[id]) el.textContent = map[id];
+  });
 }
 
 function openTransactionActions(transactionId) {
@@ -812,10 +812,15 @@ function initApp() {
   Telegram.WebApp.expand();
   TG_INIT_DATA = initDataValue;
 
-  callServer('apiEnsureUserProvisioned')
-    .then(function () { loadDashboard(); })
+  // Один запрос вместо четырёх: provisioning + дашборд + обе группы категорий.
+  callServer('apiBootstrap', state.currentPeriod)
+    .then(function (data) {
+      renderDashboard(data.dashboard);
+      state.categoriesCache.expense = data.categories.expense;
+      state.categoriesCache.income = data.categories.income;
+    })
     .catch(function (err) {
-      console.error('Provisioning/auth failed:', err);
+      console.error('Bootstrap failed:', err);
       showTelegramRequiredScreen('Ошибка: ' + err.message);
     });
 }
