@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Finance Tracker</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  /* -----------------------------------------------------------------------
+     Design tokens
+     Тёмный терминал-минимализм: стекло (glass) + один неоновый акцент.
+     Shape lock: карточки 16px, интерактивные пилюли — full pill, инпуты 10px.
+     Типографика: sans для UI/навигации, mono для чисел/дат.
+  ----------------------------------------------------------------------- */
+  :root {
+    --bg: #050607;
+    --glass-bg: rgba(255,255,255,0.045);
+    --glass-border: rgba(255,255,255,0.08);
+    --glass-highlight: rgba(255,255,255,0.06);
+    --text-primary: #F5F5F7;
+    --text-secondary: rgba(245,245,247,0.55);
+    --text-tertiary: rgba(245,245,247,0.35);
+    --accent: #39FF88;
+    --accent-glow: rgba(57,255,136,0.35);
+    --accent-ink: #06110A; /* текст поверх сплошного accent-фона, для контраста */
+    --expense: #FF5C5C;
+    --income: #39FF88;
+    --radius-card: 16px;
+    --radius-input: 10px;
+    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: radial-gradient(ellipse at top, #0A0C0D 0%, var(--bg) 60%);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    min-height: 100dvh;
+    overscroll-behavior-y: none;
+  }
+
+  #app {
+    max-width: 480px;
+    margin: 0 auto;
+    min-height: 100dvh;
+    padding: 16px 16px calc(88px + env(safe-area-inset-bottom)) 16px;
+    position: relative;
+  }
+
+  .screen { display: none; }
+  .screen.active { display: block; animation: fadeIn .18s ease; }
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  h1, h2, h3, p { margin: 0; }
+
+  .glass-card {
+    background: var(--glass-bg);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-card);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    padding: 18px;
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    .glass-card { background: #16181A; backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+
+  .section-label {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-tertiary);
+    margin-bottom: 10px;
+    display: block;
+  }
+
+  .balance-card {
+    text-align: center;
+    padding: 28px 18px 22px 18px;
+    margin-bottom: 16px;
+  }
+  .balance-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 6px;
+  }
+  .balance-value {
+    font-family: var(--font-mono);
+    font-size: 40px;
+    font-weight: 600;
+    color: var(--accent);
+    text-shadow: 0 0 24px var(--accent-glow);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .balance-sub {
+    margin-top: 10px;
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+  }
+  .balance-sub span.income { color: var(--income); }
+  .balance-sub span.expense { color: var(--expense); }
+  .balance-sub .lbl { color: var(--text-tertiary); font-family: var(--font-ui); margin-right: 4px; }
+
+  .segmented {
+    display: flex;
+    background: rgba(255,255,255,0.05);
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .segmented::-webkit-scrollbar { display: none; }
+  .segmented button {
+    flex: 1 0 auto;
+    white-space: nowrap;
+    border: none;
+    background: transparent;
+    color: var(--text-secondary);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .segmented button.active {
+    background: rgba(255,255,255,0.12);
+    color: var(--text-primary);
+  }
+
+  .row-list { display: flex; flex-direction: column; }
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 11px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+  .row:last-child { border-bottom: none; }
+  .row-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .row-icon {
+    width: 34px; height: 34px; border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; flex-shrink: 0;
+  }
+  .row-text { min-width: 0; }
+  .row-title { font-size: 15px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-sub { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row-amount { font-family: var(--font-mono); font-size: 15px; font-variant-numeric: tabular-nums; flex-shrink: 0; padding-left: 10px; }
+  .row-amount.income { color: var(--income); }
+  .row-amount.expense { color: var(--expense); }
+
+  .empty-state {
+    text-align: center;
+    padding: 32px 16px;
+    color: var(--text-tertiary);
+    font-size: 14px;
+  }
+
+  .date-group-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin: 18px 0 8px 2px;
+  }
+  .date-group-label:first-child { margin-top: 0; }
+
+  .tabbar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    display: flex;
+    justify-content: center;
+    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)) 16px;
+    background: rgba(5,6,7,0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-top: 1px solid var(--glass-border);
+  }
+  .tabbar-inner {
+    width: 100%;
+    max-width: 448px;
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+    gap: 8px;
+  }
+  .tab-btn {
+    background: none; border: none; color: var(--text-tertiary);
+    font-family: var(--font-ui); font-size: 11px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 6px 10px; cursor: pointer;
+  }
+  .tab-btn .tab-icon { font-size: 20px; line-height: 1; }
+  .tab-btn.active { color: var(--accent); }
+  .tab-add {
+    width: 52px; height: 52px; border-radius: 999px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 26px; font-weight: 400;
+    border: none; cursor: pointer;
+    box-shadow: 0 0 20px var(--accent-glow);
+    margin: -18px 4px 0 4px;
+    flex-shrink: 0;
+  }
+  .tab-add:active { transform: scale(0.96); }
+
+  .sheet-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.5);
+    display: none;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 50;
+  }
+  .sheet-overlay.open { display: flex; }
+  .sheet {
+    width: 100%; max-width: 480px;
+    background: #101214;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    border: 1px solid var(--glass-border);
+    border-bottom: none;
+    padding: 18px 18px calc(20px + env(safe-area-inset-bottom)) 18px;
+    max-height: 88dvh;
+    overflow-y: auto;
+  }
+  .sheet-handle {
+    width: 36px; height: 4px; border-radius: 999px;
+    background: rgba(255,255,255,0.2);
+    margin: 0 auto 16px auto;
+  }
+  .sheet-title { font-size: 17px; font-weight: 600; margin-bottom: 16px; }
+  .field-label { font-size: 13px; color: var(--text-secondary); margin: 16px 0 8px 0; display: block; }
+  .field-label:first-of-type { margin-top: 0; }
+
+  .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    border: 1px solid var(--glass-border);
+    background: rgba(255,255,255,0.04);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 13px;
+    padding: 9px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .chip.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+
+  .amount-input {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-input);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 28px;
+    padding: 14px 14px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .amount-input:focus { outline: none; border-color: var(--accent); }
+
+  .text-input {
+    width: 100%;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-input);
+    color: var(--text-primary);
+    font-family: var(--font-ui);
+    font-size: 15px;
+    padding: 12px 14px;
+  }
+  .text-input:focus { outline: none; border-color: var(--accent); }
+
+  .btn-primary {
+    width: 100%;
+    background: var(--accent);
+    color: var(--accent-ink);
+    border: none;
+    border-radius: 999px;
+    font-family: var(--font-ui);
+    font-size: 16px;
+    font-weight: 600;
+    padding: 15px;
+    margin-top: 20px;
+    cursor: pointer;
+  }
+  .btn-primary:active { transform: scale(0.98); }
+  .btn-primary:disabled { opacity: 0.4; cursor: default; }
+
+  .btn-secondary {
+    width: 100%;
+    background: rgba(255,255,255,0.06);
+    color: var(--text-primary);
+    border: 1px solid var(--glass-border);
+    border-radius: 999px;
+    font-family: var(--font-ui);
+    font-size: 15px;
+    padding: 13px;
+    margin-top: 8px;
+    cursor: pointer;
+  }
+
+  .error-text { color: var(--expense); font-size: 13px; margin-top: 10px; display: none; }
+  .error-text.visible { display: block; }
+
+  .skeleton-row {
+    height: 44px;
+    border-radius: 10px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.07), rgba(255,255,255,0.03));
+    background-size: 200% 100%;
+    animation: shimmer 1.4s infinite;
+    margin-bottom: 8px;
+  }
+  @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+  .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .top-bar h1 { font-size: 20px; font-weight: 600; }
+  .link-btn {
+    background: none; border: none; color: var(--text-secondary);
+    font-family: var(--font-ui); font-size: 13px; cursor: pointer; padding: 6px 0;
+  }
+
+  .mb-12 { margin-bottom: 12px; }
+  .mb-16 { margin-bottom: 16px; }
+</style>
+</head>
+<body>
+
+<div id="app">
+
+  <!-- ==================== DASHBOARD ==================== -->
+  <section id="screen-dashboard" class="screen active">
+    <div class="top-bar">
+      <h1>Финансы</h1>
+    </div>
+
+    <div class="glass-card balance-card">
+      <div class="balance-label">Баланс за период</div>
+      <div class="balance-value" id="dashboard-balance">···</div>
+      <div class="balance-sub">
+        <span><span class="lbl">Доход</span><span class="income" id="dashboard-income">···</span></span>
+        <span><span class="lbl">Расход</span><span class="expense" id="dashboard-expense">···</span></span>
+      </div>
+    </div>
+
+    <div class="segmented mb-16" id="period-selector">
+      <button data-period="today">Сегодня</button>
+      <button data-period="week" class="active">Неделя</button>
+      <button data-period="month">Месяц</button>
+      <button data-period="quarter">Квартал</button>
+      <button data-period="half_year">Полгода</button>
+      <button data-period="year">Год</button>
+    </div>
+
+    <span class="section-label">Расходы по категориям</span>
+    <div class="glass-card mb-16">
+      <div class="row-list" id="dashboard-expense-breakdown">
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div>
+      </div>
+    </div>
+
+    <span class="section-label">Доходы по категориям</span>
+    <div class="glass-card">
+      <div class="row-list" id="dashboard-income-breakdown">
+        <div class="skeleton-row"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ==================== HISTORY ==================== -->
+  <section id="screen-history" class="screen">
+    <div class="top-bar">
+      <h1>История</h1>
+    </div>
+    <div class="glass-card" id="history-container">
+      <div class="skeleton-row"></div>
+      <div class="skeleton-row"></div>
+      <div class="skeleton-row"></div>
+      <div class="skeleton-row"></div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ==================== TAB BAR ==================== -->
+<div class="tabbar">
+  <div class="tabbar-inner">
+    <button class="tab-btn active" data-screen="dashboard">
+      <span class="tab-icon">&#9633;</span>
+      <span>Дашборд</span>
+    </button>
+    <button class="tab-add" id="btn-open-add">+</button>
+    <button class="tab-btn" data-screen="history">
+      <span class="tab-icon">&#8801;</span>
+      <span>История</span>
+    </button>
+  </div>
+</div>
+
+<!-- ==================== ADD/EDIT TRANSACTION SHEET ==================== -->
+<div class="sheet-overlay" id="sheet-overlay">
+  <div class="sheet">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="sheet-title">Новая операция</div>
+
+    <div class="segmented mb-12" id="type-selector">
+      <button data-type="expense" class="active">Расход</button>
+      <button data-type="income">Доход</button>
+    </div>
+
+    <label class="field-label">Сумма</label>
+    <input type="number" inputmode="decimal" class="amount-input" id="input-amount" placeholder="0" step="0.01">
+
+    <label class="field-label">Категория</label>
+    <div class="chip-grid" id="category-chips">
+      <div class="skeleton-row" style="width:100%"></div>
+    </div>
+
+    <label class="field-label">Дата</label>
+    <div class="segmented" id="date-selector">
+      <button data-date-mode="today" class="active">Сегодня</button>
+      <button data-date-mode="yesterday">Вчера</button>
+      <button data-date-mode="custom">Выбрать</button>
+    </div>
+    <input type="date" class="text-input mb-12" id="input-custom-date" style="display:none; margin-top:8px;">
+
+    <label class="field-label">Комментарий (необязательно)</label>
+    <input type="text" class="text-input" id="input-comment" placeholder="Например: обед с коллегами" maxlength="500">
+
+    <div class="error-text" id="sheet-error"></div>
+
+    <button class="btn-primary" id="btn-save-transaction">Сохранить</button>
+    <button class="btn-secondary" id="btn-cancel-sheet">Отмена</button>
+  </div>
+</div>
+
+<script>
+/* ===========================================================================
+   Finance Tracker — Mini App frontend
+   ===========================================================================
+   Хостится отдельно от backend (GitHub Pages), не через Apps Script doGet —
+   см. комментарий в Code.gs про несовместимость GAS iframe-sandbox с
+   Telegram initData. Здесь страница работает на настоящем верхнем уровне,
+   поэтому Telegram.WebApp.initData передаётся корректно.
+
+   Backend остаётся полностью на Google Apps Script — обращаемся к нему
+   через обычный fetch() на doPost(), а не через google.script.run
+   (тот работает только для страниц, отданных из самого GAS).
+
+   Аутентификация: userId никогда не задаётся на клиенте. Каждый вызов
+   backend передаёт initData от Telegram.WebApp — backend сам извлекает
+   и проверяет user_id через validateInitData() (Auth.gs).
+=========================================================================== */
+
+// TODO: если пересоздашь деплой Apps Script (не просто новую версию,
+// а именно новый деплой) — URL изменится, обнови здесь.
+var GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyZ0YFZeiZXJ4JOfH714-Etdjdqq7MwOm3pzgI5Z-hGs2GWZscEr4bLS4Qnj8YtPpcC/exec?api=miniapp';
+
+var TG_INIT_DATA = null;
+
+function getInitData() {
+  return TG_INIT_DATA;
+}
+
+var state = {
+  currentPeriod: 'week',
+  currentType: 'expense',
+  categoriesCache: {},
+  selectedCategoryId: null,
+  selectedDateMode: 'today'
+};
+
+function callServer(fnName) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  var payload = { action: fnName, args: [getInitData()].concat(args) };
+
+  return fetch(GAS_API_URL, {
+    method: 'POST',
+    // Content-Type: text/plain намеренно — "simple request" не вызывает
+    // CORS preflight (OPTIONS), который Apps Script не умеет обрабатывать.
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify(payload)
+  })
+    .then(function (response) {
+      if (!response.ok) throw new Error('HTTP ' + response.status);
+      return response.json();
+    })
+    .then(function (json) {
+      if (!json.success) throw new Error(json.error || 'Unknown server error');
+      return json.result;
+    });
+}
+
+function showTelegramRequiredScreen(debugInfo) {
+  var debugHtml = debugInfo
+    ? '<div style="margin-top:16px; font-family: var(--font-mono); font-size:11px; color: var(--text-tertiary); text-align:left; padding:0 24px; word-break:break-all;">' + debugInfo + '</div>'
+    : '';
+  document.getElementById('app').innerHTML =
+    '<div style="padding-top:80px; text-align:center; color: var(--text-secondary); font-size: 15px;">' +
+    'Откройте это приложение через Telegram.' +
+    debugHtml +
+    '</div>';
+  document.querySelector('.tabbar').style.display = 'none';
+}
+
+function formatMoney(value) {
+  var n = Number(value) || 0;
+  return n.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' \u20BD';
+}
+
+function formatDateGroupLabel(dateStr) {
+  var todayStr = new Date().toISOString().slice(0, 10);
+  var yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  if (dateStr === todayStr) return 'Сегодня';
+  if (dateStr === yesterday) return 'Вчера';
+  var parts = dateStr.split('-');
+  return parts[2] + '.' + parts[1] + '.' + parts[0];
+}
+
+document.querySelectorAll('.tab-btn[data-screen]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var target = btn.getAttribute('data-screen');
+    document.querySelectorAll('.tab-btn[data-screen]').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
+    document.getElementById('screen-' + target).classList.add('active');
+    if (target === 'history') loadHistory();
+    if (target === 'dashboard') loadDashboard();
+  });
+});
+
+document.querySelectorAll('#period-selector button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('#period-selector button').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    state.currentPeriod = btn.getAttribute('data-period');
+    loadDashboard();
+  });
+});
+
+function renderBreakdown(containerId, items) {
+  var container = document.getElementById(containerId);
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+    return;
+  }
+  container.innerHTML = items.map(function (item) {
+    return '<div class="row">' +
+      '<div class="row-left">' +
+        '<div class="row-icon">' + escapeHtml(item.categoryName ? item.categoryName.charAt(0) : '?') + '</div>' +
+        '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
+      '</div>' +
+      '<div class="row-amount">' + formatMoney(item.amount) + '</div>' +
+    '</div>';
+  }).join('');
+}
+
+function loadDashboard() {
+  callServer('apiGetDashboard', state.currentPeriod, null, null)
+    .then(function (dashboard) {
+      document.getElementById('dashboard-balance').textContent = formatMoney(dashboard.totals.balance);
+      document.getElementById('dashboard-income').textContent = formatMoney(dashboard.totals.income);
+      document.getElementById('dashboard-expense').textContent = formatMoney(dashboard.totals.expenses);
+      renderBreakdown('dashboard-expense-breakdown', dashboard.expenseByCategory);
+      renderBreakdown('dashboard-income-breakdown', dashboard.incomeByCategory);
+    })
+    .catch(function (err) {
+      document.getElementById('dashboard-balance').textContent = 'Ошибка';
+      console.error(err);
+    });
+}
+
+function loadHistory() {
+  var container = document.getElementById('history-container');
+  callServer('apiGetTransactions', {})
+    .then(function (transactions) {
+      if (!transactions || transactions.length === 0) {
+        container.innerHTML = '<div class="empty-state">Пока нет операций.<br>Нажмите + , чтобы добавить первую.</div>';
+        return;
+      }
+
+      var groups = {};
+      var order = [];
+      transactions.forEach(function (t) {
+        var d = t.operation_date;
+        if (!groups[d]) { groups[d] = []; order.push(d); }
+        groups[d].push(t);
+      });
+
+      var html = '';
+      order.forEach(function (date) {
+        html += '<div class="date-group-label">' + formatDateGroupLabel(date) + '</div>';
+        html += '<div class="row-list">';
+        groups[date].forEach(function (t) {
+          var isIncome = t.type === 'income';
+          html += '<div class="row" data-tx-id="' + t.id + '" onclick="openTransactionActions(\'' + t.id + '\')">' +
+            '<div class="row-left">' +
+              '<div class="row-icon">' + (isIncome ? '&#8593;' : '&#8595;') + '</div>' +
+              '<div class="row-text">' +
+                '<div class="row-title" data-category-id="' + t.category_id + '">' + escapeHtml(t.category_id) + '</div>' +
+                (t.comment ? '<div class="row-sub">' + escapeHtml(t.comment) + '</div>' : '') +
+              '</div>' +
+            '</div>' +
+            '<div class="row-amount ' + (isIncome ? 'income' : 'expense') + '">' +
+              (isIncome ? '+' : '\u2212') + formatMoney(t.amount) +
+            '</div>' +
+          '</div>';
+        });
+        html += '</div>';
+      });
+
+      container.innerHTML = html;
+      enrichCategoryNames();
+    })
+    .catch(function (err) {
+      container.innerHTML = '<div class="empty-state">Не удалось загрузить историю</div>';
+      console.error(err);
+    });
+}
+
+function enrichCategoryNames() {
+  Promise.all([
+    callServer('apiGetCategories', 'expense'),
+    callServer('apiGetCategories', 'income')
+  ]).then(function (results) {
+    var map = {};
+    results[0].concat(results[1]).forEach(function (c) { map[c.id] = c.name; });
+    document.querySelectorAll('#history-container .row-title').forEach(function (el) {
+      var id = el.getAttribute('data-category-id');
+      if (map[id]) el.textContent = map[id];
+    });
+  }).catch(function (err) { console.error(err); });
+}
+
+function openTransactionActions(transactionId) {
+  if (!confirm('Отменить эту операцию?')) return;
+  callServer('apiCancelTransaction', transactionId)
+    .then(function () { loadHistory(); loadDashboard(); })
+    .catch(function (err) { alert('Не удалось отменить операцию. Попробуйте ещё раз.'); console.error(err); });
+}
+
+var sheetOverlay = document.getElementById('sheet-overlay');
+
+document.getElementById('btn-open-add').addEventListener('click', function () {
+  openAddSheet();
+});
+document.getElementById('btn-cancel-sheet').addEventListener('click', closeSheet);
+sheetOverlay.addEventListener('click', function (e) {
+  if (e.target === sheetOverlay) closeSheet();
+});
+
+function openAddSheet() {
+  state.selectedCategoryId = null;
+  state.selectedDateMode = 'today';
+  document.getElementById('input-amount').value = '';
+  document.getElementById('input-comment').value = '';
+  document.getElementById('sheet-error').classList.remove('visible');
+  document.querySelectorAll('#date-selector button').forEach(function (b) { b.classList.remove('active'); });
+  document.querySelector('#date-selector button[data-date-mode="today"]').classList.add('active');
+  document.getElementById('input-custom-date').style.display = 'none';
+
+  document.querySelectorAll('#type-selector button').forEach(function (b) { b.classList.remove('active'); });
+  document.querySelector('#type-selector button[data-type="expense"]').classList.add('active');
+  state.currentType = 'expense';
+
+  sheetOverlay.classList.add('open');
+  loadCategoryChips();
+}
+
+function closeSheet() {
+  sheetOverlay.classList.remove('open');
+}
+
+document.querySelectorAll('#type-selector button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('#type-selector button').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    state.currentType = btn.getAttribute('data-type');
+    state.selectedCategoryId = null;
+    loadCategoryChips();
+  });
+});
+
+document.querySelectorAll('#date-selector button').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    document.querySelectorAll('#date-selector button').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    state.selectedDateMode = btn.getAttribute('data-date-mode');
+    document.getElementById('input-custom-date').style.display = (state.selectedDateMode === 'custom') ? 'block' : 'none';
+  });
+});
+
+function loadCategoryChips() {
+  var container = document.getElementById('category-chips');
+  container.innerHTML = '<div class="skeleton-row" style="width:100%"></div>';
+
+  var cacheKey = state.currentType;
+  var promise = state.categoriesCache[cacheKey]
+    ? Promise.resolve(state.categoriesCache[cacheKey])
+    : callServer('apiGetCategories', state.currentType).then(function (cats) {
+        state.categoriesCache[cacheKey] = cats;
+        return cats;
+      });
+
+  promise.then(function (categories) {
+    if (!categories || categories.length === 0) {
+      container.innerHTML = '<div class="empty-state">Нет доступных категорий</div>';
+      return;
+    }
+    container.innerHTML = categories.map(function (c) {
+      return '<button type="button" class="chip" data-category-id="' + c.id + '">' + escapeHtml(c.name) + '</button>';
+    }).join('');
+    container.querySelectorAll('.chip').forEach(function (chip) {
+      chip.addEventListener('click', function () {
+        container.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('selected'); });
+        chip.classList.add('selected');
+        state.selectedCategoryId = chip.getAttribute('data-category-id');
+      });
+    });
+  }).catch(function (err) {
+    container.innerHTML = '<div class="empty-state">Не удалось загрузить категории</div>';
+    console.error(err);
+  });
+}
+
+document.getElementById('btn-save-transaction').addEventListener('click', function () {
+  var errorEl = document.getElementById('sheet-error');
+  errorEl.classList.remove('visible');
+
+  var amount = document.getElementById('input-amount').value;
+  var comment = document.getElementById('input-comment').value;
+
+  if (!amount || Number(amount) <= 0) {
+    errorEl.textContent = 'Укажите сумму больше нуля';
+    errorEl.classList.add('visible');
+    return;
+  }
+  if (!state.selectedCategoryId) {
+    errorEl.textContent = 'Выберите категорию';
+    errorEl.classList.add('visible');
+    return;
+  }
+
+  var date;
+  if (state.selectedDateMode === 'today') date = 'today';
+  else if (state.selectedDateMode === 'yesterday') date = 'yesterday';
+  else {
+    date = document.getElementById('input-custom-date').value;
+    if (!date) {
+      errorEl.textContent = 'Выберите дату';
+      errorEl.classList.add('visible');
+      return;
+    }
+  }
+
+  var btn = document.getElementById('btn-save-transaction');
+  btn.disabled = true;
+  btn.textContent = 'Сохранение...';
+
+  callServer('apiCreateTransaction', state.currentType, state.selectedCategoryId, amount, date, comment)
+    .then(function () {
+      closeSheet();
+      loadDashboard();
+      loadHistory();
+    })
+    .catch(function (err) {
+      errorEl.textContent = 'Не удалось сохранить операцию. Попробуйте ещё раз.';
+      errorEl.classList.add('visible');
+      console.error(err);
+    })
+    .finally(function () {
+      btn.disabled = false;
+      btn.textContent = 'Сохранить';
+    });
+});
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function initApp() {
+  var tgExists = (typeof Telegram !== 'undefined') && !!Telegram.WebApp;
+  var initDataValue = tgExists ? Telegram.WebApp.initData : '';
+
+  if (!tgExists || !initDataValue) {
+    showTelegramRequiredScreen();
+    return;
+  }
+
+  Telegram.WebApp.ready();
+  Telegram.WebApp.expand();
+  TG_INIT_DATA = initDataValue;
+
+  callServer('apiEnsureUserProvisioned')
+    .then(function () { loadDashboard(); })
+    .catch(function (err) {
+      console.error('Provisioning/auth failed:', err);
+      showTelegramRequiredScreen('Ошибка: ' + err.message);
+    });
+}
+
+initApp();
+</script>
+
+</body>
+</html>
