@@ -336,16 +336,51 @@
   .mb-12 { margin-bottom: 12px; }
   .mb-16 { margin-bottom: 16px; }
 </style>
+<style>
+  /* Состояния оптимистичного UI */
+  .row.pending { opacity: 0.55; }
+  .row.failed { opacity: 1; }
+  .row.failed .row-title::after {
+    content: ' · не сохранено';
+    color: var(--expense);
+    font-size: 12px;
+  }
+  .stale-hint {
+    text-align: center;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    padding: 6px 0 0 0;
+    font-family: var(--font-mono);
+  }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: calc(100px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(12px);
+    background: #1C1C1E;
+    border: 1px solid var(--glass-border);
+    color: var(--text-primary);
+    font-size: 14px;
+    padding: 11px 18px;
+    border-radius: 999px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s ease, transform .2s ease;
+    z-index: 100;
+    max-width: 88%;
+    text-align: center;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.error { border-color: var(--expense); }
+</style>
+
 </head>
 <body>
 
 <div id="app">
 
-  <!-- ==================== DASHBOARD ==================== -->
   <section id="screen-dashboard" class="screen active">
-    <div class="top-bar">
-      <h1>Финансы</h1>
-    </div>
+    <div class="top-bar"><h1>Финансы</h1></div>
 
     <div class="glass-card balance-card">
       <div class="balance-label">Баланс за период</div>
@@ -354,6 +389,7 @@
         <span><span class="lbl">Доход</span><span class="income" id="dashboard-income">···</span></span>
         <span><span class="lbl">Расход</span><span class="expense" id="dashboard-expense">···</span></span>
       </div>
+      <div class="stale-hint" id="stale-hint" style="display:none;">обновляем…</div>
     </div>
 
     <div class="segmented mb-16" id="period-selector">
@@ -368,9 +404,7 @@
     <span class="section-label">Расходы по категориям</span>
     <div class="glass-card mb-16">
       <div class="row-list" id="dashboard-expense-breakdown">
-        <div class="skeleton-row"></div>
-        <div class="skeleton-row"></div>
-        <div class="skeleton-row"></div>
+        <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
       </div>
     </div>
 
@@ -382,41 +416,31 @@
     </div>
   </section>
 
-  <!-- ==================== HISTORY ==================== -->
   <section id="screen-history" class="screen">
-    <div class="top-bar">
-      <h1>История</h1>
-    </div>
+    <div class="top-bar"><h1>История</h1></div>
     <div class="glass-card" id="history-container">
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
-      <div class="skeleton-row"></div>
+      <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
     </div>
   </section>
 
 </div>
 
-<!-- ==================== TAB BAR ==================== -->
 <div class="tabbar">
   <div class="tabbar-inner">
     <button class="tab-btn active" data-screen="dashboard">
-      <span class="tab-icon">&#9633;</span>
-      <span>Дашборд</span>
+      <span class="tab-icon">&#9633;</span><span>Дашборд</span>
     </button>
     <button class="tab-add" id="btn-open-add">+</button>
     <button class="tab-btn" data-screen="history">
-      <span class="tab-icon">&#8801;</span>
-      <span>История</span>
+      <span class="tab-icon">&#8801;</span><span>История</span>
     </button>
   </div>
 </div>
 
-<!-- ==================== ADD/EDIT TRANSACTION SHEET ==================== -->
 <div class="sheet-overlay" id="sheet-overlay">
   <div class="sheet">
     <div class="sheet-handle"></div>
-    <div class="sheet-title" id="sheet-title">Новая операция</div>
+    <div class="sheet-title">Новая операция</div>
 
     <div class="segmented mb-12" id="type-selector">
       <button data-type="expense" class="active">Расход</button>
@@ -427,9 +451,7 @@
     <input type="number" inputmode="decimal" class="amount-input" id="input-amount" placeholder="0" step="0.01">
 
     <label class="field-label">Категория</label>
-    <div class="chip-grid" id="category-chips">
-      <div class="skeleton-row" style="width:100%"></div>
-    </div>
+    <div class="chip-grid" id="category-chips"></div>
 
     <label class="field-label">Дата</label>
     <div class="segmented" id="date-selector">
@@ -449,88 +471,321 @@
   </div>
 </div>
 
+<div class="toast" id="toast"></div>
+
 <script>
 /* ===========================================================================
-   Finance Tracker — Mini App frontend
-   ===========================================================================
-   Хостится отдельно от backend (GitHub Pages), не через Apps Script doGet —
-   см. комментарий в Code.gs про несовместимость GAS iframe-sandbox с
-   Telegram initData. Здесь страница работает на настоящем верхнем уровне,
-   поэтому Telegram.WebApp.initData передаётся корректно.
+   Finance Tracker — Mini App
 
-   Backend остаётся полностью на Google Apps Script — обращаемся к нему
-   через обычный fetch() на doPost(), а не через google.script.run
-   (тот работает только для страниц, отданных из самого GAS).
+   Хостится отдельно от backend (не через Apps Script doGet): GAS оборачивает
+   HTML во вложенный iframe на чужом домене, а Telegram не отдаёт initData
+   такому фрейму — initData всегда приходит пустым. Здесь страница работает
+   на верхнем уровне, поэтому авторизация проходит нормально.
 
-   Аутентификация: userId никогда не задаётся на клиенте. Каждый вызов
-   backend передаёт initData от Telegram.WebApp — backend сам извлекает
-   и проверяет user_id через validateInitData() (Auth.gs).
+   Модель работы с данными:
+   1. При старте мгновенно рисуем последнее известное состояние из
+      localStorage (если есть) — приложение выглядит загруженным сразу.
+   2. Параллельно один bootstrap-запрос приносит актуальные категории и
+      все активные транзакции.
+   3. Дашборд и переключение периодов считаются локально из этих транзакций,
+      без обращений к серверу. Сырьё приходит с сервера, агрегация —
+      детерминированная, повторяет серверную логику один в один.
+   4. Запись оптимистична: изменение видно сразу, запрос уходит в фон,
+      при ошибке — откат и уведомление.
 =========================================================================== */
 
-// TODO: если пересоздашь деплой Apps Script (не просто новую версию,
-// а именно новый деплой) — URL изменится, обнови здесь.
 var GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyZ0YFZeiZXJ4JOfH714-Etdjdqq7MwOm3pzgI5Z-hGs2GWZscEr4bLS4Qnj8YtPpcC/exec?api=miniapp';
+var CACHE_KEY = 'ft_cache_v1';
 
 var TG_INIT_DATA = null;
-
-function getInitData() {
-  return TG_INIT_DATA;
-}
 
 var state = {
   currentPeriod: 'week',
   currentType: 'expense',
-  categoriesCache: {},
   selectedCategoryId: null,
-  selectedDateMode: 'today'
+  selectedDateMode: 'today',
+  categories: { expense: [], income: [] },
+  transactions: [],
+  categoryNames: {},
+  serverToday: null,
+  loaded: false
 };
 
-function callServer(fnName) {
-  var args = Array.prototype.slice.call(arguments, 1);
-  var payload = { action: fnName, args: [getInitData()].concat(args) };
+/* ------------------------------------------------------------------ */
+/* Транспорт                                                           */
+/* ------------------------------------------------------------------ */
 
+function callServer(action) {
+  var args = Array.prototype.slice.call(arguments, 1);
   return fetch(GAS_API_URL, {
     method: 'POST',
-    // Content-Type: text/plain намеренно — "simple request" не вызывает
-    // CORS preflight (OPTIONS), который Apps Script не умеет обрабатывать.
+    // text/plain — "simple request", не вызывает CORS preflight,
+    // который Apps Script не обрабатывает.
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({ action: action, args: [TG_INIT_DATA].concat(args) })
   })
-    .then(function (response) {
-      if (!response.ok) throw new Error('HTTP ' + response.status);
-      return response.json();
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
     })
     .then(function (json) {
-      if (!json.success) throw new Error(json.error || 'Unknown server error');
+      if (!json.success) throw new Error(json.error || 'Ошибка сервера');
       return json.result;
     });
 }
 
-function showTelegramRequiredScreen(debugInfo) {
-  var debugHtml = debugInfo
-    ? '<div style="margin-top:16px; font-family: var(--font-mono); font-size:11px; color: var(--text-tertiary); text-align:left; padding:0 24px; word-break:break-all;">' + debugInfo + '</div>'
-    : '';
-  document.getElementById('app').innerHTML =
-    '<div style="padding-top:80px; text-align:center; color: var(--text-secondary); font-size: 15px;">' +
-    'Откройте это приложение через Telegram.' +
-    debugHtml +
-    '</div>';
-  document.querySelector('.tabbar').style.display = 'none';
+/* ------------------------------------------------------------------ */
+/* Локальный кэш между запусками                                       */
+/* ------------------------------------------------------------------ */
+
+function saveCache() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      categories: state.categories,
+      transactions: state.transactions.filter(function (t) { return !t.__pending && !t.__failed; }),
+      serverToday: state.serverToday,
+      savedAt: Date.now()
+    }));
+  } catch (e) { /* приватный режим или переполнение — не критично */ }
 }
 
-function formatMoney(value) {
-  var n = Number(value) || 0;
-  return n.toLocaleString('ru-RU', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' \u20BD';
+function loadCache() {
+  try {
+    var raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
 }
 
-function formatDateGroupLabel(dateStr) {
-  var todayStr = new Date().toISOString().slice(0, 10);
-  var yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-  if (dateStr === todayStr) return 'Сегодня';
-  if (dateStr === yesterday) return 'Вчера';
-  var parts = dateStr.split('-');
-  return parts[2] + '.' + parts[1] + '.' + parts[0];
+/* ------------------------------------------------------------------ */
+/* Периоды — та же логика, что на сервере (неделя с понедельника)      */
+/* ------------------------------------------------------------------ */
+
+function todayParts() {
+  var s = (state.serverToday || new Date().toISOString().slice(0, 10)).split('-');
+  return { year: +s[0], month: +s[1], day: +s[2] };
 }
+
+function fmtCal(p) {
+  return p.year + '-' + String(p.month).padStart(2, '0') + '-' + String(p.day).padStart(2, '0');
+}
+
+function addDaysCal(p, days) {
+  var d = new Date(Date.UTC(p.year, p.month - 1, p.day) + days * 86400000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+function isoWeekday(p) {
+  var d = new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay();
+  return d === 0 ? 7 : d;
+}
+
+function lastDayOfMonth(year, month) {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+}
+
+function resolvePeriod(key) {
+  var t = todayParts();
+  switch (key) {
+    case 'today':
+      return { startDate: fmtCal(t), endDate: fmtCal(t) };
+    case 'week': {
+      var mon = addDaysCal(t, -(isoWeekday(t) - 1));
+      return { startDate: fmtCal(mon), endDate: fmtCal(addDaysCal(mon, 6)) };
+    }
+    case 'month':
+      return {
+        startDate: fmtCal({ year: t.year, month: t.month, day: 1 }),
+        endDate: fmtCal({ year: t.year, month: t.month, day: lastDayOfMonth(t.year, t.month) })
+      };
+    case 'quarter': {
+      var qs = Math.floor((t.month - 1) / 3) * 3 + 1, qe = qs + 2;
+      return {
+        startDate: fmtCal({ year: t.year, month: qs, day: 1 }),
+        endDate: fmtCal({ year: t.year, month: qe, day: lastDayOfMonth(t.year, qe) })
+      };
+    }
+    case 'half_year': {
+      var hs = t.month <= 6 ? 1 : 7, he = hs + 5;
+      return {
+        startDate: fmtCal({ year: t.year, month: hs, day: 1 }),
+        endDate: fmtCal({ year: t.year, month: he, day: lastDayOfMonth(t.year, he) })
+      };
+    }
+    case 'year':
+      return {
+        startDate: fmtCal({ year: t.year, month: 1, day: 1 }),
+        endDate: fmtCal({ year: t.year, month: 12, day: 31 })
+      };
+    default:
+      return resolvePeriod('week');
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Локальный расчёт дашборда                                           */
+/* ------------------------------------------------------------------ */
+
+function computeDashboard(periodKey) {
+  var p = resolvePeriod(periodKey);
+  var income = 0, expenses = 0;
+  var byExpense = {}, byIncome = {};
+
+  state.transactions.forEach(function (t) {
+    if (t.__failed) return;
+    var date = t.operation_date;
+    if (date < p.startDate || date > p.endDate) return;
+
+    var amount = Number(t.amount) || 0;
+    if (t.type === 'income') {
+      income += amount;
+      byIncome[t.category_id] = (byIncome[t.category_id] || 0) + amount;
+    } else {
+      expenses += amount;
+      byExpense[t.category_id] = (byExpense[t.category_id] || 0) + amount;
+    }
+  });
+
+  return {
+    totals: {
+      income: round2(income),
+      expenses: round2(expenses),
+      balance: round2(income - expenses)
+    },
+    expenseByCategory: breakdown(byExpense),
+    incomeByCategory: breakdown(byIncome)
+  };
+}
+
+function breakdown(map) {
+  return Object.keys(map).map(function (id) {
+    return { categoryId: id, categoryName: state.categoryNames[id] || id, amount: round2(map[id]) };
+  }).sort(function (a, b) { return b.amount - a.amount; });
+}
+
+function round2(v) { return Math.round(v * 100) / 100; }
+
+/* ------------------------------------------------------------------ */
+/* Отрисовка                                                           */
+/* ------------------------------------------------------------------ */
+
+function formatMoney(v) {
+  return (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' \u20BD';
+}
+
+function formatDateLabel(dateStr) {
+  var t = state.serverToday || new Date().toISOString().slice(0, 10);
+  if (dateStr === t) return 'Сегодня';
+  var parts = t.split('-');
+  var y = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]) - 86400000)
+    .toISOString().slice(0, 10);
+  if (dateStr === y) return 'Вчера';
+  var d = dateStr.split('-');
+  return d[2] + '.' + d[1] + '.' + d[0];
+}
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
+
+function renderDashboard() {
+  var d = computeDashboard(state.currentPeriod);
+  document.getElementById('dashboard-balance').textContent = formatMoney(d.totals.balance);
+  document.getElementById('dashboard-income').textContent = formatMoney(d.totals.income);
+  document.getElementById('dashboard-expense').textContent = formatMoney(d.totals.expenses);
+  renderBreakdown('dashboard-expense-breakdown', d.expenseByCategory);
+  renderBreakdown('dashboard-income-breakdown', d.incomeByCategory);
+}
+
+function renderBreakdown(containerId, items) {
+  var el = document.getElementById(containerId);
+  if (!items.length) {
+    el.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+    return;
+  }
+  el.innerHTML = items.map(function (item) {
+    return '<div class="row"><div class="row-left">' +
+      '<div class="row-icon">' + escapeHtml((item.categoryName || '?').charAt(0)) + '</div>' +
+      '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
+      '</div><div class="row-amount">' + formatMoney(item.amount) + '</div></div>';
+  }).join('');
+}
+
+function renderHistory() {
+  var el = document.getElementById('history-container');
+  var list = state.transactions;
+
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-state">Пока нет операций.<br>Нажмите + , чтобы добавить первую.</div>';
+    return;
+  }
+
+  var groups = {}, order = [];
+  list.forEach(function (t) {
+    if (!groups[t.operation_date]) { groups[t.operation_date] = []; order.push(t.operation_date); }
+    groups[t.operation_date].push(t);
+  });
+  order.sort().reverse();
+
+  var html = '';
+  order.forEach(function (date) {
+    html += '<div class="date-group-label">' + formatDateLabel(date) + '</div><div class="row-list">';
+    groups[date].forEach(function (t) {
+      var isIncome = t.type === 'income';
+      var cls = t.__pending ? ' pending' : (t.__failed ? ' failed' : '');
+      html += '<div class="row' + cls + '" data-tx-id="' + escapeHtml(t.id) + '">' +
+        '<div class="row-left">' +
+          '<div class="row-icon">' + (isIncome ? '&#8593;' : '&#8595;') + '</div>' +
+          '<div class="row-text">' +
+            '<div class="row-title">' + escapeHtml(state.categoryNames[t.category_id] || t.category_id) + '</div>' +
+            (t.comment ? '<div class="row-sub">' + escapeHtml(t.comment) + '</div>' : '') +
+          '</div>' +
+        '</div>' +
+        '<div class="row-amount ' + (isIncome ? 'income' : 'expense') + '">' +
+          (isIncome ? '+' : '\u2212') + formatMoney(t.amount) +
+        '</div></div>';
+    });
+    html += '</div>';
+  });
+
+  el.innerHTML = html;
+
+  el.querySelectorAll('.row[data-tx-id]').forEach(function (row) {
+    row.addEventListener('click', function () {
+      cancelTransactionOptimistic(row.getAttribute('data-tx-id'));
+    });
+  });
+}
+
+function renderAll() {
+  renderDashboard();
+  renderHistory();
+}
+
+function rebuildCategoryNames() {
+  state.categoryNames = {};
+  state.categories.expense.concat(state.categories.income).forEach(function (c) {
+    state.categoryNames[c.id] = c.name;
+  });
+}
+
+function showToast(message, isError) {
+  var el = document.getElementById('toast');
+  el.textContent = message;
+  el.className = 'toast show' + (isError ? ' error' : '');
+  clearTimeout(el.__timer);
+  el.__timer = setTimeout(function () { el.className = 'toast'; }, 3000);
+}
+
+function setStale(isStale) {
+  document.getElementById('stale-hint').style.display = isStale ? 'block' : 'none';
+}
+
+/* ------------------------------------------------------------------ */
+/* Навигация                                                           */
+/* ------------------------------------------------------------------ */
 
 document.querySelectorAll('.tab-btn[data-screen]').forEach(function (btn) {
   btn.addEventListener('click', function () {
@@ -539,8 +794,6 @@ document.querySelectorAll('.tab-btn[data-screen]').forEach(function (btn) {
     btn.classList.add('active');
     document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
     document.getElementById('screen-' + target).classList.add('active');
-    if (target === 'history') loadHistory();
-    if (target === 'dashboard') loadDashboard();
   });
 });
 
@@ -549,116 +802,17 @@ document.querySelectorAll('#period-selector button').forEach(function (btn) {
     document.querySelectorAll('#period-selector button').forEach(function (b) { b.classList.remove('active'); });
     btn.classList.add('active');
     state.currentPeriod = btn.getAttribute('data-period');
-    loadDashboard();
+    renderDashboard(); // локально, мгновенно, без запроса
   });
 });
 
-function renderBreakdown(containerId, items) {
-  var container = document.getElementById(containerId);
-  if (!items || items.length === 0) {
-    container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
-    return;
-  }
-  container.innerHTML = items.map(function (item) {
-    return '<div class="row">' +
-      '<div class="row-left">' +
-        '<div class="row-icon">' + escapeHtml(item.categoryName ? item.categoryName.charAt(0) : '?') + '</div>' +
-        '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
-      '</div>' +
-      '<div class="row-amount">' + formatMoney(item.amount) + '</div>' +
-    '</div>';
-  }).join('');
-}
-
-function renderDashboard(dashboard) {
-  document.getElementById('dashboard-balance').textContent = formatMoney(dashboard.totals.balance);
-  document.getElementById('dashboard-income').textContent = formatMoney(dashboard.totals.income);
-  document.getElementById('dashboard-expense').textContent = formatMoney(dashboard.totals.expenses);
-  renderBreakdown('dashboard-expense-breakdown', dashboard.expenseByCategory);
-  renderBreakdown('dashboard-income-breakdown', dashboard.incomeByCategory);
-}
-
-function loadDashboard() {
-  callServer('apiGetDashboard', state.currentPeriod, null, null)
-    .then(renderDashboard)
-    .catch(function (err) {
-      document.getElementById('dashboard-balance').textContent = 'Ошибка';
-      console.error(err);
-    });
-}
-
-function loadHistory() {
-  var container = document.getElementById('history-container');
-  callServer('apiGetTransactions', {})
-    .then(function (transactions) {
-      if (!transactions || transactions.length === 0) {
-        container.innerHTML = '<div class="empty-state">Пока нет операций.<br>Нажмите + , чтобы добавить первую.</div>';
-        return;
-      }
-
-      var groups = {};
-      var order = [];
-      transactions.forEach(function (t) {
-        var d = t.operation_date;
-        if (!groups[d]) { groups[d] = []; order.push(d); }
-        groups[d].push(t);
-      });
-
-      var html = '';
-      order.forEach(function (date) {
-        html += '<div class="date-group-label">' + formatDateGroupLabel(date) + '</div>';
-        html += '<div class="row-list">';
-        groups[date].forEach(function (t) {
-          var isIncome = t.type === 'income';
-          html += '<div class="row" data-tx-id="' + t.id + '" onclick="openTransactionActions(\'' + t.id + '\')">' +
-            '<div class="row-left">' +
-              '<div class="row-icon">' + (isIncome ? '&#8593;' : '&#8595;') + '</div>' +
-              '<div class="row-text">' +
-                '<div class="row-title" data-category-id="' + t.category_id + '">' + escapeHtml(t.category_id) + '</div>' +
-                (t.comment ? '<div class="row-sub">' + escapeHtml(t.comment) + '</div>' : '') +
-              '</div>' +
-            '</div>' +
-            '<div class="row-amount ' + (isIncome ? 'income' : 'expense') + '">' +
-              (isIncome ? '+' : '\u2212') + formatMoney(t.amount) +
-            '</div>' +
-          '</div>';
-        });
-        html += '</div>';
-      });
-
-      container.innerHTML = html;
-      enrichCategoryNames();
-    })
-    .catch(function (err) {
-      container.innerHTML = '<div class="empty-state">Не удалось загрузить историю</div>';
-      console.error(err);
-    });
-}
-
-function enrichCategoryNames() {
-  var cached = (state.categoriesCache.expense || []).concat(state.categoriesCache.income || []);
-  if (cached.length === 0) return; // кэш ещё не заполнен — имена подтянутся при следующей загрузке
-
-  var map = {};
-  cached.forEach(function (c) { map[c.id] = c.name; });
-  document.querySelectorAll('#history-container .row-title').forEach(function (el) {
-    var id = el.getAttribute('data-category-id');
-    if (map[id]) el.textContent = map[id];
-  });
-}
-
-function openTransactionActions(transactionId) {
-  if (!confirm('Отменить эту операцию?')) return;
-  callServer('apiCancelTransaction', transactionId)
-    .then(function () { loadHistory(); loadDashboard(); })
-    .catch(function (err) { alert('Не удалось отменить операцию. Попробуйте ещё раз.'); console.error(err); });
-}
+/* ------------------------------------------------------------------ */
+/* Форма добавления                                                    */
+/* ------------------------------------------------------------------ */
 
 var sheetOverlay = document.getElementById('sheet-overlay');
 
-document.getElementById('btn-open-add').addEventListener('click', function () {
-  openAddSheet();
-});
+document.getElementById('btn-open-add').addEventListener('click', openAddSheet);
 document.getElementById('btn-cancel-sheet').addEventListener('click', closeSheet);
 sheetOverlay.addEventListener('click', function (e) {
   if (e.target === sheetOverlay) closeSheet();
@@ -667,76 +821,75 @@ sheetOverlay.addEventListener('click', function (e) {
 function openAddSheet() {
   state.selectedCategoryId = null;
   state.selectedDateMode = 'today';
+  state.currentType = 'expense';
+
   document.getElementById('input-amount').value = '';
   document.getElementById('input-comment').value = '';
   document.getElementById('sheet-error').classList.remove('visible');
-  document.querySelectorAll('#date-selector button').forEach(function (b) { b.classList.remove('active'); });
-  document.querySelector('#date-selector button[data-date-mode="today"]').classList.add('active');
   document.getElementById('input-custom-date').style.display = 'none';
 
-  document.querySelectorAll('#type-selector button').forEach(function (b) { b.classList.remove('active'); });
-  document.querySelector('#type-selector button[data-type="expense"]').classList.add('active');
-  state.currentType = 'expense';
+  setSegmentActive('#date-selector', 'data-date-mode', 'today');
+  setSegmentActive('#type-selector', 'data-type', 'expense');
 
+  renderCategoryChips();
   sheetOverlay.classList.add('open');
-  loadCategoryChips();
 }
 
-function closeSheet() {
-  sheetOverlay.classList.remove('open');
+function closeSheet() { sheetOverlay.classList.remove('open'); }
+
+function setSegmentActive(selector, attr, value) {
+  document.querySelectorAll(selector + ' button').forEach(function (b) {
+    b.classList.toggle('active', b.getAttribute(attr) === value);
+  });
 }
 
 document.querySelectorAll('#type-selector button').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    document.querySelectorAll('#type-selector button').forEach(function (b) { b.classList.remove('active'); });
-    btn.classList.add('active');
+    setSegmentActive('#type-selector', 'data-type', btn.getAttribute('data-type'));
     state.currentType = btn.getAttribute('data-type');
     state.selectedCategoryId = null;
-    loadCategoryChips();
+    renderCategoryChips();
   });
 });
 
 document.querySelectorAll('#date-selector button').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    document.querySelectorAll('#date-selector button').forEach(function (b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    state.selectedDateMode = btn.getAttribute('data-date-mode');
-    document.getElementById('input-custom-date').style.display = (state.selectedDateMode === 'custom') ? 'block' : 'none';
+    var mode = btn.getAttribute('data-date-mode');
+    setSegmentActive('#date-selector', 'data-date-mode', mode);
+    state.selectedDateMode = mode;
+    document.getElementById('input-custom-date').style.display = mode === 'custom' ? 'block' : 'none';
   });
 });
 
-function loadCategoryChips() {
+/** Категории уже в памяти после bootstrap — запрос не нужен. */
+function renderCategoryChips() {
   var container = document.getElementById('category-chips');
-  container.innerHTML = '<div class="skeleton-row" style="width:100%"></div>';
+  var list = state.categories[state.currentType] || [];
 
-  var cacheKey = state.currentType;
-  var promise = state.categoriesCache[cacheKey]
-    ? Promise.resolve(state.categoriesCache[cacheKey])
-    : callServer('apiGetCategories', state.currentType).then(function (cats) {
-        state.categoriesCache[cacheKey] = cats;
-        return cats;
-      });
+  if (!list.length) {
+    container.innerHTML = state.loaded
+      ? '<div class="empty-state">Нет доступных категорий</div>'
+      : '<div class="skeleton-row" style="width:100%"></div>';
+    return;
+  }
 
-  promise.then(function (categories) {
-    if (!categories || categories.length === 0) {
-      container.innerHTML = '<div class="empty-state">Нет доступных категорий</div>';
-      return;
-    }
-    container.innerHTML = categories.map(function (c) {
-      return '<button type="button" class="chip" data-category-id="' + c.id + '">' + escapeHtml(c.name) + '</button>';
-    }).join('');
-    container.querySelectorAll('.chip').forEach(function (chip) {
-      chip.addEventListener('click', function () {
-        container.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('selected'); });
-        chip.classList.add('selected');
-        state.selectedCategoryId = chip.getAttribute('data-category-id');
-      });
+  container.innerHTML = list.map(function (c) {
+    return '<button type="button" class="chip" data-category-id="' + escapeHtml(c.id) + '">' +
+      escapeHtml(c.name) + '</button>';
+  }).join('');
+
+  container.querySelectorAll('.chip').forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      container.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('selected'); });
+      chip.classList.add('selected');
+      state.selectedCategoryId = chip.getAttribute('data-category-id');
     });
-  }).catch(function (err) {
-    container.innerHTML = '<div class="empty-state">Не удалось загрузить категории</div>';
-    console.error(err);
   });
 }
+
+/* ------------------------------------------------------------------ */
+/* Оптимистичное сохранение                                            */
+/* ------------------------------------------------------------------ */
 
 document.getElementById('btn-save-transaction').addEventListener('click', function () {
   var errorEl = document.getElementById('sheet-error');
@@ -745,87 +898,184 @@ document.getElementById('btn-save-transaction').addEventListener('click', functi
   var amount = document.getElementById('input-amount').value;
   var comment = document.getElementById('input-comment').value;
 
-  if (!amount || Number(amount) <= 0) {
-    errorEl.textContent = 'Укажите сумму больше нуля';
-    errorEl.classList.add('visible');
-    return;
-  }
-  if (!state.selectedCategoryId) {
-    errorEl.textContent = 'Выберите категорию';
-    errorEl.classList.add('visible');
-    return;
-  }
+  if (!amount || Number(amount) <= 0) return showFieldError('Укажите сумму больше нуля');
+  if (!state.selectedCategoryId) return showFieldError('Выберите категорию');
 
   var date;
-  if (state.selectedDateMode === 'today') date = 'today';
+  if (state.selectedDateMode === 'today') date = state.serverToday || 'today';
   else if (state.selectedDateMode === 'yesterday') date = 'yesterday';
   else {
     date = document.getElementById('input-custom-date').value;
-    if (!date) {
-      errorEl.textContent = 'Выберите дату';
-      errorEl.classList.add('visible');
-      return;
-    }
+    if (!date) return showFieldError('Выберите дату');
   }
 
-  var btn = document.getElementById('btn-save-transaction');
-  btn.disabled = true;
-  btn.textContent = 'Сохранение...';
+  saveTransactionOptimistic({
+    type: state.currentType,
+    categoryId: state.selectedCategoryId,
+    amount: Number(amount),
+    date: date,
+    comment: comment
+  });
 
-  callServer('apiCreateTransaction', state.currentType, state.selectedCategoryId, amount, date, comment)
-    .then(function () {
-      closeSheet();
-      loadDashboard();
-      loadHistory();
-    })
-    .catch(function (err) {
-      errorEl.textContent = 'Не удалось сохранить операцию. Попробуйте ещё раз.';
-      errorEl.classList.add('visible');
-      console.error(err);
-    })
-    .finally(function () {
-      btn.disabled = false;
-      btn.textContent = 'Сохранить';
-    });
+  closeSheet();
 });
 
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+function showFieldError(message) {
+  var el = document.getElementById('sheet-error');
+  el.textContent = message;
+  el.classList.add('visible');
+}
+
+/**
+ * Рисуем транзакцию сразу, запрос уходит в фон.
+ *
+ * clientId — идемпотентный ключ: если запрос уйдёт дважды (ретрай, слабая
+ * сеть), сервер вернёт уже созданную запись вместо дубля. Пока ответа нет,
+ * строка отображается приглушённой — пользователь видит, что она ещё в пути,
+ * а не считает её подтверждённой.
+ */
+function saveTransactionOptimistic(input) {
+  var clientId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+
+  var optimistic = {
+    id: 't_' + clientId,
+    type: input.type,
+    category_id: input.categoryId,
+    amount: input.amount,
+    operation_date: resolveLocalDate(input.date),
+    comment: input.comment,
+    status: 'active',
+    __pending: true
+  };
+
+  state.transactions.unshift(optimistic);
+  renderAll();
+
+  callServer('apiCreateTransaction', input.type, input.categoryId, input.amount,
+             input.date, input.comment, clientId)
+    .then(function (saved) {
+      var idx = findTxIndex(optimistic.id);
+      if (idx !== -1) state.transactions[idx] = saved;
+      renderAll();
+      saveCache();
+    })
+    .catch(function (err) {
+      var idx = findTxIndex(optimistic.id);
+      if (idx !== -1) {
+        state.transactions[idx].__pending = false;
+        state.transactions[idx].__failed = true;
+      }
+      renderAll();
+      showToast('Не удалось сохранить операцию', true);
+      console.error(err);
+    });
+}
+
+function resolveLocalDate(date) {
+  if (date === 'today') return state.serverToday || new Date().toISOString().slice(0, 10);
+  if (date === 'yesterday') {
+    var base = state.serverToday || new Date().toISOString().slice(0, 10);
+    var p = base.split('-');
+    return new Date(Date.UTC(+p[0], +p[1] - 1, +p[2]) - 86400000).toISOString().slice(0, 10);
+  }
+  return date;
+}
+
+function findTxIndex(id) {
+  for (var i = 0; i < state.transactions.length; i++) {
+    if (state.transactions[i].id === id) return i;
+  }
+  return -1;
+}
+
+/** Отмена тоже оптимистична: строка исчезает сразу, при ошибке возвращается. */
+function cancelTransactionOptimistic(transactionId) {
+  var idx = findTxIndex(transactionId);
+  if (idx === -1) return;
+
+  var removed = state.transactions[idx];
+  if (removed.__pending) {
+    showToast('Операция ещё сохраняется');
+    return;
+  }
+  if (!confirm('Отменить эту операцию?')) return;
+
+  state.transactions.splice(idx, 1);
+  renderAll();
+  saveCache();
+
+  callServer('apiCancelTransaction', transactionId)
+    .catch(function (err) {
+      state.transactions.splice(idx, 0, removed);
+      renderAll();
+      saveCache();
+      showToast('Не удалось отменить операцию', true);
+      console.error(err);
+    });
+}
+
+/* ------------------------------------------------------------------ */
+/* Старт                                                               */
+/* ------------------------------------------------------------------ */
+
+function showTelegramRequired(details) {
+  document.getElementById('app').innerHTML =
+    '<div style="padding-top:80px; text-align:center; color:var(--text-secondary); font-size:15px;">' +
+    'Откройте это приложение через Telegram.' +
+    (details ? '<div style="margin-top:14px; font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary); padding:0 24px; word-break:break-all;">' + escapeHtml(details) + '</div>' : '') +
+    '</div>';
+  document.querySelector('.tabbar').style.display = 'none';
 }
 
 function initApp() {
-  var tgExists = (typeof Telegram !== 'undefined') && !!Telegram.WebApp;
-  var initDataValue = tgExists ? Telegram.WebApp.initData : '';
-
-  if (!tgExists || !initDataValue) {
-    showTelegramRequiredScreen();
+  var tg = (typeof Telegram !== 'undefined') && Telegram.WebApp;
+  if (!tg || !Telegram.WebApp.initData) {
+    showTelegramRequired();
     return;
   }
 
   Telegram.WebApp.ready();
   Telegram.WebApp.expand();
-  TG_INIT_DATA = initDataValue;
+  TG_INIT_DATA = Telegram.WebApp.initData;
 
-  // Один запрос вместо четырёх: provisioning + дашборд + обе группы категорий.
+  // 1. Мгновенно показываем прошлое состояние, если оно есть.
+  var cached = loadCache();
+  if (cached && cached.transactions) {
+    state.categories = cached.categories || { expense: [], income: [] };
+    state.transactions = cached.transactions;
+    state.serverToday = cached.serverToday;
+    rebuildCategoryNames();
+    renderAll();
+    setStale(true);
+  }
+
+  // 2. Один запрос за актуальными данными.
   callServer('apiBootstrap', state.currentPeriod)
     .then(function (data) {
-      renderDashboard(data.dashboard);
-      state.categoriesCache.expense = data.categories.expense;
-      state.categoriesCache.income = data.categories.income;
+      state.categories = data.categories;
+      state.serverToday = data.serverToday;
+      rebuildCategoryNames();
+
+      // Не затираем то, что ещё в полёте или упало.
+      var local = state.transactions.filter(function (t) { return t.__pending || t.__failed; });
+      state.transactions = local.concat(data.transactions);
+
+      state.loaded = true;
+      setStale(false);
+      renderAll();
+      renderCategoryChips();
+      saveCache();
     })
     .catch(function (err) {
+      setStale(false);
       console.error('Bootstrap failed:', err);
-      showTelegramRequiredScreen('Ошибка: ' + err.message);
+      if (!cached) showTelegramRequired(err.message);
+      else showToast('Не удалось обновить данные', true);
     });
 }
 
 initApp();
+
 </script>
 
 </body>
