@@ -176,9 +176,11 @@
   .alltime-balance-row .balance-value { text-shadow: 0 0 16px var(--accent-glow); }
   .alltime-balance-row .lbl { font-size: 12px; }
 
-  .period-income-expense-row { display: flex; justify-content: center; gap: 24px; }
-  .income-expense-block { text-align: left; min-width: 0; }
-  .income-expense-divider { align-self: stretch; width: 1px; background: var(--divider); }
+  /* Блоки равной фиксированной доли: подписи и разделитель не должны
+     ездить при смене периода из-за разной длины сумм. */
+  .period-income-expense-row { display: flex; gap: 20px; }
+  .income-expense-block { text-align: left; flex: 1 1 0; min-width: 0; overflow: hidden; }
+  .income-expense-divider { align-self: stretch; width: 1px; background: var(--divider); flex: 0 0 1px; }
   .income-expense-block .lbl {
     display: block; margin-bottom: 11px;
     font-family: var(--font-ui); font-size: 13px; color: var(--text-secondary); font-weight: 400;
@@ -335,11 +337,12 @@
     overflow: hidden;
   }
   .sheet-scroll-area {
-    overflow-y: auto; padding: 0 18px 16px 18px;
+    overflow-y: auto; overflow-x: hidden; padding: 0 18px 16px 18px;
     flex: 1 1 auto; min-height: 0;
     display: flex; flex-direction: column;
   }
-  .sheet-scroll-area > * { flex-shrink: 0; }
+  .sheet-scroll-area > * { flex-shrink: 0; max-width: 100%; }
+  .sheet { overflow-x: hidden; }
   .sheet-fixed-actions {
     padding: 12px 18px calc(16px + env(safe-area-inset-bottom)) 18px;
     border-top: 1px solid var(--divider);
@@ -375,11 +378,22 @@
   .amount-input:focus { outline: none; border-color: var(--accent); }
 
   .text-input {
-    width: 100%; background: var(--card-elevated); border: 1px solid var(--border);
+    width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
+    background: var(--card-elevated); border: 1px solid var(--border);
     border-radius: var(--radius-input); color: var(--text-primary);
     font-family: var(--font-ui); font-size: 15px; padding: 12px 14px;
   }
   .text-input:focus { outline: none; border-color: var(--accent); }
+
+  /* iOS рисует input[type=date] нативным контролом с собственной минимальной
+     шириной — без этого поле распирает контейнер и появляется горизонтальный
+     скролл (в десктопных браузерах эффект не воспроизводится). */
+  input[type="date"].text-input {
+    -webkit-appearance: none; appearance: none;
+    display: block; height: 46px; line-height: normal;
+  }
+  input[type="date"].text-input::-webkit-date-and-time-value { text-align: left; }
+  input[type="date"].text-input::-webkit-calendar-picker-indicator { margin-left: auto; }
 
   .btn-primary {
     width: 100%; background: var(--accent); color: var(--accent-ink); border: none;
@@ -442,20 +456,15 @@
   .mb-20 { margin-bottom: 20px; }
 
   /* --- Светлая тема Telegram: неон на белом нечитаем, свечения снимаем --- */
-  body[data-theme="light"] .balance-value,
-  body[data-theme="light"] .balance-value.negative,
-  body[data-theme="light"] .income-expense-value.income,
-  body[data-theme="light"] .income-expense-value.expense,
-  body[data-theme="light"] .period-item.active,
-  body[data-theme="light"] .chip.selected,
-  body[data-theme="light"] .row-amount.income,
-  body[data-theme="light"] .row-amount.expense {
-    text-shadow: none;
-  }
-  body[data-theme="light"] .row-icon i { filter: none !important; }
+  /* --- Светлая тема Telegram: любое "свечение" на светлом фоне читается
+     как грязное затемнение, поэтому глушим тени сплошным правилом, а не
+     перечислением селекторов — иначе новая подсветка легко проскочит мимо. --- */
+  body[data-theme="light"] * { text-shadow: none !important; }
+  body[data-theme="light"] [style*="drop-shadow"] { filter: none !important; }
   body[data-theme="light"] .bg-drift,
   body[data-theme="light"] .bg-noise { opacity: 0; }
-  body[data-theme="light"] #history-chart-container svg { filter: none !important; }
+  body[data-theme="light"] .tab-add { box-shadow: 0 2px 10px rgba(0,0,0,0.12); }
+  body[data-theme="light"] .pending-dot { animation: none; }
 </style>
 
 </head>
@@ -500,8 +509,8 @@
     </div>
     <div class="glass-card tappable-card mb-16" id="top7-card">
       <div class="chip-grid mb-12" id="top7-type-toggle">
-        <button type="button" class="chip selected" data-top7-type="income">Доходы</button>
-        <button type="button" class="chip" data-top7-type="expense">Расходы</button>
+        <button type="button" class="chip" data-top7-type="income">Доходы</button>
+        <button type="button" class="chip selected" data-top7-type="expense">Расходы</button>
       </div>
       <div class="row-list" id="dashboard-top7-breakdown">
         <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
@@ -797,7 +806,7 @@ var state = {
   editingTransactionId: null,
   lastDashboardValues: { balance: 0, income: 0, expense: 0 },
   lastBreakdown: { expense: [], income: [] },
-  top7Type: 'income',
+  top7Type: 'expense',
   lastTop7Values: {},
   historyTypeFilter: 'all',
   historyPeriodFilter: 'all',
@@ -1088,10 +1097,32 @@ document.getElementById('chart-category-select').addEventListener('change', func
 
 function populateChartCategorySelect() {
   var select = document.getElementById('chart-category-select');
-  var categories = state.categories[state.top7Type] || [];
+  var previousValue = select.value;
   var allLabel = state.top7Type === 'expense' ? 'Все расходы' : 'Все доходы';
+
+  // Показываем только категории, по которым есть операции в текущем периоде:
+  // выбор пустой категории всё равно дал бы пустой график.
+  var range = resolvePeriod(state.currentPeriod);
+  var used = {};
+  state.transactions.forEach(function (t) {
+    if (t.__failed) return;
+    if (t.type !== state.top7Type) return;
+    if (t.operation_date < range.startDate || t.operation_date > range.endDate) return;
+    used[t.category_id] = true;
+  });
+
+  var categories = (state.categories[state.top7Type] || []).filter(function (c) {
+    return used[c.id];
+  });
+
   select.innerHTML = '<option value="all">' + allLabel + '</option>' +
     categories.map(function (c) { return '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>'; }).join('');
+
+  // Если ранее выбранная категория выпала из списка — возвращаемся на «все».
+  var stillAvailable = previousValue === 'all' || used[previousValue];
+  select.value = stillAvailable ? previousValue : 'all';
+  if (!stillAvailable) chartState.categoryId = 'all';
+
   select.dataset.focusColor = state.top7Type === 'expense' ? 'var(--expense)' : 'var(--income-soft)';
   select.style.borderColor = '';
 }
@@ -1217,10 +1248,11 @@ function renderTrendChart() {
     return '<text x="' + p.x + '" y="' + (height - 4) + '" text-anchor="middle" class="chart-month-label">' + p.label + '</text>';
   }).join('');
 
-  var glowStrength = '0 0 6px ' + color + '55';
+  var isLight = document.body.getAttribute('data-theme') === 'light';
+  var glowStrength = isLight ? 'none' : 'drop-shadow(0 0 6px ' + color + '55)';
 
   container.innerHTML =
-    '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" style="filter: drop-shadow(' + glowStrength + ');">' +
+    '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" style="filter: ' + glowStrength + ';">' +
     '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
     dots + valueLabels + monthLabels +
     '</svg>';
@@ -1557,6 +1589,8 @@ function createScrollPicker(container, onSettle, opts) {
 
     items.forEach(function (item) {
       var r = item.getBoundingClientRect();
+      // Ширина без учёта scale — scale уже применён к getBoundingClientRect.
+      var layoutWidth = item.offsetWidth;
       var itemCenter = r.left + r.width / 2;
       var dist = Math.abs(itemCenter - centerX);
       if (magnify) {
@@ -1565,6 +1599,11 @@ function createScrollPicker(container, onSettle, opts) {
         var opacity = 1 - norm * 0.62;
         item.style.transform = 'scale(' + scale.toFixed(3) + ')';
         item.style.opacity = opacity.toFixed(3);
+        // Стягиваем layout-бокс до фактической визуальной ширины, иначе
+        // у сжатых пилюль промежутки выглядят шире, чем у центральной.
+        var shrink = layoutWidth * (1 - scale) / 2;
+        item.style.marginLeft = (-shrink).toFixed(2) + 'px';
+        item.style.marginRight = (-shrink).toFixed(2) + 'px';
       }
       if (dist < closestDist) { closestDist = dist; closest = item; }
     });
@@ -1615,6 +1654,7 @@ var periodPicker = createScrollPicker(document.getElementById('period-scroll'), 
   if (key !== state.currentPeriod) {
     state.currentPeriod = key;
     renderDashboard(true);
+    populateChartCategorySelect();
     renderTrendChart();
   }
 });
@@ -1854,10 +1894,19 @@ function openEditSheet(transactionId) {
   amountInput.value = formatAmountInput(String(t.amount));
   document.getElementById('input-comment').value = t.comment || '';
   document.getElementById('sheet-error').classList.remove('visible');
-  document.getElementById('date-scroll').style.display = 'none';
-  document.getElementById('input-custom-date').style.display = 'block';
+
+  // Как в «новой операции»: те же пилюли дат. Дату операции добавляем
+  // отдельной пилюлей, если она вне стандартного ряда (позавчера…завтра).
+  document.getElementById('date-scroll').style.display = 'flex';
+  document.getElementById('input-custom-date').style.display = 'none';
   document.getElementById('input-custom-date').value = t.operation_date;
-  state.selectedDateValue = 'custom';
+  generateDateScrollItems(t.operation_date);
+  initDatePicker(); // пункты перегенерированы — пикер надо пересоздать
+  state.selectedDateValue = t.operation_date;
+  requestAnimationFrame(function () {
+    scrollDatePickerTo(t.operation_date, false);
+    if (datePicker) datePicker.updateMagnifier();
+  });
 
   setChipSelected('#type-selector-chips', 'data-type', t.type);
   renderCategoryChips();
