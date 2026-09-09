@@ -5,50 +5,81 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Finance Tracker</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="https://unpkg.com/lucide@latest"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  /* -----------------------------------------------------------------------
-     Design tokens
-     Тёмный терминал-минимализм: стекло (glass) + один неоновый акцент.
-     Shape lock: карточки 16px, интерактивные пилюли — full pill, инпуты 10px.
-     Типографика: sans для UI/навигации, mono для чисел/дат.
-  ----------------------------------------------------------------------- */
   :root {
-    --bg: #050607;
-    --glass-bg: rgba(255,255,255,0.045);
-    --glass-border: rgba(255,255,255,0.08);
-    --glass-highlight: rgba(255,255,255,0.06);
-    --text-primary: #F5F5F7;
-    --text-secondary: rgba(245,245,247,0.55);
-    --text-tertiary: rgba(245,245,247,0.35);
+    --bg: #0A0C0B;
+    --bg-elevated: #0F1211;
+    --card: #151917;
+    --card-elevated: #1B201D;
+    --border: #3A423D;
+    --divider: #1D2320;
+
+    --text-primary: #E8F0EB;
+    --text-secondary: #8D9A92;
+    --text-tertiary: #5D6862;
+
     --accent: #39FF88;
-    --accent-glow: rgba(57,255,136,0.35);
-    --accent-ink: #06110A; /* текст поверх сплошного accent-фона, для контраста */
-    --expense: #FF5C5C;
+    --accent-glow: rgba(57,255,136,0.18);
+    --accent-ink: #06110A;
+
     --income: #39FF88;
+    --income-soft: #1FAF5D;
+    --income-glow: rgba(57,255,136,0.18);
+
+    --expense: #FF4568;
+    --expense-soft: #B93650;
+    --expense-glow: rgba(255,69,104,0.16);
+
     --radius-card: 16px;
     --radius-input: 10px;
-    --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
-    --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+    --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', "SF Mono", ui-monospace, monospace;
   }
 
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
   html, body {
-    margin: 0;
-    padding: 0;
-    background: radial-gradient(ellipse at top, #0A0C0D 0%, var(--bg) 60%);
+    margin: 0; padding: 0;
+    background: var(--bg);
     color: var(--text-primary);
     font-family: var(--font-ui);
     min-height: 100dvh;
     overscroll-behavior-y: none;
+    overflow-x: hidden;
+  }
+
+  /* Тёмный графитовый фон с двумя явно движущимися размытыми зелёными
+     пятнами — видимое, но неторопливое движение, не плоский чёрный. */
+  /* z-index НЕ отрицательный: у body нет своего стекового контекста, и
+     слой с z-index:-1 может провалиться под сплошной фон страницы и стать
+     полностью невидимым. Порядок в DOM (bg-drift раньше #app) сам по себе
+     достаточен, чтобы #app рисовался поверх. */
+  .bg-drift { position: fixed; inset: 0; z-index: 0; background: var(--bg); overflow: hidden; }
+  .bg-noise {
+    position: absolute; inset: -20%; opacity: 0.055; mix-blend-mode: screen;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    animation: noiseShift .4s steps(4) infinite;
+  }
+  /* Живое зерно: быстрая смена смещения текстуры вместо статичной картинки —
+     эффект мерцающей плёночной зернистости, а не однократный узор. */
+  @keyframes noiseShift {
+    0%   { transform: translate(0, 0); }
+    25%  { transform: translate(-2%, 1%); }
+    50%  { transform: translate(1%, -2%); }
+    75%  { transform: translate(-1%, -1%); }
+    100% { transform: translate(0, 0); }
   }
 
   #app {
-    max-width: 480px;
-    margin: 0 auto;
-    min-height: 100dvh;
-    padding: 16px 16px calc(88px + env(safe-area-inset-bottom)) 16px;
+    max-width: 480px; margin: 0 auto; min-height: 100dvh;
+    padding: calc(20px + env(safe-area-inset-top)) 16px calc(96px + env(safe-area-inset-bottom)) 16px;
     position: relative;
+    z-index: 1;
+    background: var(--bg-elevated);
   }
 
   .screen { display: none; }
@@ -58,366 +89,433 @@
   h1, h2, h3, p { margin: 0; }
 
   .glass-card {
-    background: var(--glass-bg);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid var(--glass-border);
+    background: var(--card);
+    border: 1px solid var(--border);
     border-radius: var(--radius-card);
-    box-shadow: inset 0 1px 0 var(--glass-highlight);
-    padding: 18px;
+    padding: 16px;
   }
-
-  @media (prefers-reduced-transparency: reduce) {
-    .glass-card { background: #16181A; backdrop-filter: none; -webkit-backdrop-filter: none; }
-  }
+  .glass-card.card-elevated { background: var(--card-elevated); }
 
   .section-label {
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: var(--text-tertiary);
-    margin-bottom: 10px;
-    display: block;
+    font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-tertiary); margin-bottom: 10px;
   }
-
-  .balance-card {
-    text-align: center;
-    padding: 28px 18px 22px 18px;
-    margin-bottom: 16px;
-  }
-  .balance-label {
-    font-size: 13px;
-    color: var(--text-secondary);
-    margin-bottom: 6px;
-  }
-  .balance-value {
-    font-family: var(--font-mono);
-    font-size: 40px;
-    font-weight: 600;
-    color: var(--accent);
-    text-shadow: 0 0 24px var(--accent-glow);
-    font-variant-numeric: tabular-nums;
-    letter-spacing: -0.01em;
-  }
-  .balance-sub {
-    margin-top: 10px;
-    display: flex;
-    justify-content: center;
-    gap: 18px;
-    font-family: var(--font-mono);
-    font-size: 13px;
-  }
-  .balance-sub span.income { color: var(--income); }
-  .balance-sub span.expense { color: var(--expense); }
-  .balance-sub .lbl { color: var(--text-tertiary); font-family: var(--font-ui); margin-right: 4px; }
-
-  .segmented {
-    display: flex;
-    background: rgba(255,255,255,0.05);
-    border-radius: 999px;
-    padding: 3px;
-    gap: 2px;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .segmented::-webkit-scrollbar { display: none; }
-  .segmented button {
-    flex: 1 0 auto;
-    white-space: nowrap;
-    border: none;
-    background: transparent;
-    color: var(--text-secondary);
-    font-family: var(--font-ui);
-    font-size: 13px;
-    padding: 8px 14px;
-    border-radius: 999px;
+  .section-label-clickable {
+    display: flex; align-items: center; justify-content: space-between;
     cursor: pointer;
   }
-  .segmented button.active {
-    background: rgba(255,255,255,0.12);
-    color: var(--text-primary);
+  .section-chevron { width: 15px; height: 15px; color: var(--text-tertiary); }
+
+  #top7-type-toggle .chip.selected[data-top7-type="expense"],
+  #type-selector-chips .chip.selected[data-type="expense"],
+  #history-type-filter .chip.selected[data-history-type="expense"],
+  #popup-breakdown-type-toggle .chip.selected[data-breakdown-type="expense"] {
+    color: var(--expense); border-color: var(--expense);
+    text-shadow: 0 0 2px rgba(255,69,104,0.6), 0 0 8px var(--expense-glow);
+  }
+  #top7-type-toggle .chip.selected[data-top7-type="income"],
+  #type-selector-chips .chip.selected[data-type="income"],
+  #history-type-filter .chip.selected[data-history-type="income"],
+  #popup-breakdown-type-toggle .chip.selected[data-breakdown-type="income"] {
+    color: var(--income-soft); border-color: var(--income-soft);
+    text-shadow: 0 0 2px rgba(31,175,93,0.6), 0 0 8px rgba(31,175,93,0.3);
   }
 
-  .row-list { display: flex; flex-direction: column; }
+  /* Лёгкий тактильный отклик — подтверждает, что карточку можно тапнуть */
+  .tappable-card { cursor: pointer; transition: transform .12s ease; position: relative; }
+  .tappable-card.ripple-active::after {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    border: 1px solid var(--accent); pointer-events: none;
+    animation: borderRipple .5s ease-out;
+  }
+  @keyframes borderRipple {
+    0%   { box-shadow: 0 0 0 0 rgba(57,255,136,0.5); opacity: 1; }
+    100% { box-shadow: 0 0 0 6px rgba(57,255,136,0); opacity: 0; }
+  }
+  .tappable-card:active { transform: scale(0.98); }
+
+  #breakdown-pie-container {
+    display: flex; align-items: center; justify-content: center; gap: 20px;
+    padding: 8px 0 20px 0; position: relative;
+  }
+  #breakdown-pie-container svg { width: 168px; height: 168px; flex-shrink: 0; }
+  .pie-legend { display: flex; flex-direction: column; gap: 8px; }
+  .pie-legend-item {
+    display: flex; align-items: center; gap: 7px;
+    font-family: var(--font-ui); font-size: 13px; color: var(--text-primary);
+  }
+  .pie-legend-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+  .pie-legend-percent { font-family: var(--font-mono); color: var(--text-secondary); font-weight: 500; }
+  .pie-legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 110px; }
+  .pie-tooltip {
+    position: absolute; transform: translate(-50%, -100%);
+    background: var(--card-elevated); border: 1px solid var(--border);
+    color: var(--text-primary); font-family: var(--font-ui); font-size: 12px; font-weight: 500;
+    padding: 5px 10px; border-radius: 8px; white-space: nowrap;
+    opacity: 0; pointer-events: none; transition: opacity .1s ease;
+    z-index: 100;
+  }
+  .pie-tooltip.visible { opacity: 1; }
+
+  select.text-input {
+    appearance: none; -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23E8F0EB' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 14px center;
+    padding: 6px 38px 6px 14px; border-radius: 999px; font-size: 13px;
+  }
+
+  #history-chart-container { padding-top: 4px; }
+  #history-chart-container svg { width: 100%; height: 140px; overflow: visible; }
+  .chart-month-label { font-size: 10px; fill: var(--text-tertiary); font-family: var(--font-mono); }
+  .chart-value-label { font-size: 10px; fill: var(--text-secondary); font-family: var(--font-mono); }
+
+  /* --- Балансовый блок: без карточки, период визуально примыкает к нему --- */
+  .balance-block { text-align: left; padding: 4px 0 0 0; margin-bottom: 0; }
+
+  .alltime-balance-row { display: flex; align-items: baseline; gap: 10px; }
+  .alltime-balance-row .balance-value { text-shadow: 0 0 16px var(--accent-glow); }
+  .alltime-balance-row .lbl { font-size: 12px; }
+
+  .period-income-expense-row { display: flex; justify-content: center; gap: 24px; }
+  .income-expense-block { text-align: left; min-width: 0; }
+  .income-expense-divider { align-self: stretch; width: 1px; background: var(--divider); }
+  .income-expense-block .lbl {
+    display: block; margin-bottom: 11px;
+    font-family: var(--font-ui); font-size: 13px; color: var(--text-secondary); font-weight: 400;
+  }
+  .income-expense-value {
+    font-family: var(--font-mono); font-size: 30px; font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap; display: inline-block; max-width: 100%;
+  }
+  .income-expense-value.income { color: var(--income); text-shadow: 0 0 3px rgba(57,255,136,0.6), 0 0 18px var(--income-glow); }
+  .income-expense-value.expense { color: var(--expense); text-shadow: 0 0 3px rgba(255,69,104,0.6), 0 0 18px var(--expense-glow); }
+  .balance-block > .lbl { font-family: var(--font-ui); font-size: 13px; color: var(--text-tertiary); font-weight: 400; margin-bottom: 4px; display: block; }
+  .balance-value {
+    font-family: var(--font-mono); font-size: 42px; font-weight: 400;
+    color: var(--income);
+    text-shadow: 0 0 4px rgba(57,255,136,0.65), 0 0 30px var(--accent-glow);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    white-space: nowrap; display: inline-block; max-width: 100%;
+  }
+  .balance-value.negative { color: var(--expense); text-shadow: 0 0 4px rgba(255,69,104,0.65), 0 0 30px var(--expense-glow); }
+  .balance-sub {
+    margin-top: 8px; display: flex; justify-content: flex-start; gap: 22px;
+    font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums;
+  }
+  .balance-sub .income { color: var(--income-soft); }
+  .balance-sub .expense { color: var(--expense-soft); }
+  .balance-sub .lbl { font-family: var(--font-ui); font-size: 13px; color: var(--text-tertiary); font-weight: 400; }
+
+  /* --- Скролл-пикер периода: центр — под "увеличительным стеклом" --- */
+  .period-scroll {
+    display: flex; overflow-x: auto; scroll-snap-type: x mandatory;
+    gap: 8px; padding: 6px calc(50% - 30px) 16px calc(50% - 30px);
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .period-scroll::-webkit-scrollbar { display: none; }
+  .period-item, .chip {
+    scroll-snap-align: center; flex: 0 0 auto;
+    padding: 6px 14px; font-family: var(--font-ui); font-size: 13px; font-weight: 400;
+    color: var(--text-tertiary); cursor: pointer; white-space: nowrap;
+    transition: color .15s ease, border-color .15s ease, background .15s ease, text-shadow .15s ease;
+    border: 1px solid var(--border); background: var(--card-elevated); border-radius: 999px;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .period-item { transform: scale(0.85); opacity: 0.5; }
+  .period-item.plain { transform: none; opacity: 1; min-height: 29px; flex-shrink: 0; }
+  .period-item.active, .chip.selected {
+    color: var(--text-primary); font-weight: 400;
+    border-width: 1px; border-color: var(--text-primary); background: var(--card-elevated);
+    text-shadow: 0 0 2px rgba(232,240,235,0.7), 0 0 10px rgba(232,240,235,0.4);
+  }
+
+  /* --- Карточка выбора периода: без фона, просто контейнер для пилюль.
+     Влияет на карточку баланса выше и на разбивку по категориям ниже. --- */
+  .period-picker-card { padding: 0; }
+
+  /* --- Разбивка по категориям --- */
+  .row-list { display: flex; flex-direction: column; transition: opacity .22s ease; }
+  .row-list.fading { opacity: 0; }
   .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 11px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 11px 0; border-bottom: 1px solid var(--divider);
   }
   .row:last-child { border-bottom: none; }
-  .row-left { display: flex; align-items: center; gap: 10px; min-width: 0; }
-  .row-icon {
-    width: 34px; height: 34px; border-radius: 999px;
-    background: rgba(255,255,255,0.08);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 14px; flex-shrink: 0;
+  .breakdown-popup-divider { border-top: 1px solid var(--divider); margin: 4px 0 8px 0; }
+  .breakdown-list .row { border-bottom: 1px solid var(--divider); padding: 9px 0; }
+  .breakdown-list .row:last-child { border-bottom: none; }
+  .row[data-tx-id] {
+    cursor: pointer; margin: 0 -12px; padding-left: 12px; padding-right: 12px;
+    border-radius: 10px; transition: background-color .1s ease;
   }
+  .row[data-tx-id]:active { background-color: rgba(255,255,255,0.07); }
+
+  .row-amount-inline {
+    display: flex; align-items: baseline; gap: 7px;
+    flex-shrink: 0; padding-left: 10px;
+  }
+  .row-percent { font-size: 12px; color: var(--text-tertiary); font-family: var(--font-mono); font-weight: 500; }
+  .row-left { display: flex; align-items: center; gap: 11px; min-width: 0; }
+  .row-icon {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .row-icon svg, .row-icon i { width: 19px; height: 19px; stroke-width: 1.75; }
   .row-text { min-width: 0; }
   .row-title { font-size: 15px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-sub { font-size: 12px; color: var(--text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row-amount { font-family: var(--font-mono); font-size: 15px; font-variant-numeric: tabular-nums; flex-shrink: 0; padding-left: 10px; }
-  .row-amount.income { color: var(--income); }
-  .row-amount.expense { color: var(--expense); }
+  .row-amount.income { color: var(--income-soft); text-shadow: 0 0 6px rgba(31,175,93,0.4); }
+  .row-amount.expense { color: var(--expense-soft); text-shadow: 0 0 6px rgba(185,54,80,0.4); }
 
-  .empty-state {
-    text-align: center;
-    padding: 32px 16px;
-    color: var(--text-tertiary);
-    font-size: 14px;
-  }
+  .empty-state { text-align: center; padding: 28px 16px; color: var(--text-tertiary); font-size: 14px; }
 
   .date-group-label {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    color: var(--text-tertiary);
+    font-family: var(--font-ui); font-weight: 400; font-size: 12px; color: var(--text-tertiary);
     margin: 18px 0 8px 2px;
   }
   .date-group-label:first-child { margin-top: 0; }
 
+  /* --- Нижние кнопки: без панели, без подписей, каждая — своя стеклянная пилюля --- */
   .tabbar {
-    position: fixed;
-    left: 0; right: 0; bottom: 0;
-    display: flex;
-    justify-content: center;
-    padding: 10px 16px calc(10px + env(safe-area-inset-bottom)) 16px;
-    background: rgba(5,6,7,0.7);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-top: 1px solid var(--glass-border);
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; justify-content: center; align-items: center;
+    padding: 0 16px calc(30px + env(safe-area-inset-bottom)) 16px;
+    gap: 16px; pointer-events: none;
+    z-index: 40;
   }
-  .tabbar-inner {
-    width: 100%;
-    max-width: 448px;
-    display: flex;
-    align-items: center;
-    justify-content: space-around;
-    gap: 8px;
-  }
+  .tabbar > * { pointer-events: auto; }
   .tab-btn {
-    background: none; border: none; color: var(--text-tertiary);
-    font-family: var(--font-ui); font-size: 11px;
-    display: flex; flex-direction: column; align-items: center; gap: 3px;
-    padding: 6px 10px; cursor: pointer;
-  }
-  .tab-btn .tab-icon { font-size: 20px; line-height: 1; }
-  .tab-btn.active { color: var(--accent); }
-  .tab-add {
-    width: 52px; height: 52px; border-radius: 999px;
-    background: var(--accent);
-    color: var(--accent-ink);
+    width: 50px; height: 50px; border-radius: 999px;
+    background: var(--card);
+    border: 1px solid var(--border);
     display: flex; align-items: center; justify-content: center;
-    font-size: 26px; font-weight: 400;
-    border: none; cursor: pointer;
-    box-shadow: 0 0 20px var(--accent-glow);
-    margin: -18px 4px 0 4px;
+    color: var(--text-secondary); cursor: pointer;
+  }
+  .tab-btn svg { width: 21px; height: 21px; stroke-width: 1.75; }
+  .tab-btn.active { color: var(--accent); border-color: rgba(57,255,136,0.3); }
+  .tab-add {
+    width: 56px; height: 56px; border-radius: 999px;
+    background: var(--accent); color: var(--accent-ink);
+    display: flex; align-items: center; justify-content: center;
+    border: none; cursor: pointer; box-shadow: 0 0 22px var(--accent-glow);
+  }
+  .tab-add svg { width: 24px; height: 24px; stroke-width: 2; }
+  .tab-add:active, .tab-btn:active { transform: scale(0.94); }
+
+  /* --- Bottom sheet (добавление / редактирование) --- */
+  .sheet-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: flex-end; justify-content: center; z-index: 50;
+    opacity: 0; visibility: hidden; pointer-events: none;
+    transition: opacity .22s ease, visibility 0s linear .22s;
+  }
+  .sheet-overlay.open {
+    opacity: 1; visibility: visible; pointer-events: auto;
+    transition: opacity .22s ease, visibility 0s linear 0s;
+  }
+  .sheet {
+    width: 100%; max-width: 480px; background: var(--card-elevated);
+    border-top-left-radius: 22px; border-top-right-radius: 22px;
+    border: 1px solid var(--border); border-bottom: none;
+    padding: 16px 18px calc(20px + env(safe-area-inset-bottom)) 18px;
+    max-height: 90dvh; overflow-y: auto;
+    transform: translateY(28px);
+    transition: transform .28s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .sheet-overlay.open .sheet { transform: translateY(0); }
+  .sheet.sheet-fixed-footer {
+    height: 90dvh;
+    padding: 16px 0 0 0;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .sheet-scroll-area {
+    overflow-y: auto; padding: 0 18px 16px 18px;
+    flex: 1 1 auto; min-height: 0;
+    display: flex; flex-direction: column;
+  }
+  .sheet-scroll-area > * { flex-shrink: 0; }
+  .sheet-fixed-actions {
+    padding: 12px 18px calc(16px + env(safe-area-inset-bottom)) 18px;
+    border-top: 1px solid var(--divider);
     flex-shrink: 0;
   }
-  .tab-add:active { transform: scale(0.96); }
-
-  .sheet-overlay {
-    position: fixed; inset: 0;
-    background: rgba(0,0,0,0.5);
-    display: none;
-    align-items: flex-end;
-    justify-content: center;
-    z-index: 50;
+  .sheet-fixed-actions .btn-primary { margin-top: 0; }
+  .sheet-header-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px; margin-bottom: 16px;
   }
-  .sheet-overlay.open { display: flex; }
-  .sheet {
-    width: 100%; max-width: 480px;
-    background: #101214;
-    border-top-left-radius: 20px;
-    border-top-right-radius: 20px;
-    border: 1px solid var(--glass-border);
-    border-bottom: none;
-    padding: 18px 18px calc(20px + env(safe-area-inset-bottom)) 18px;
-    max-height: 88dvh;
-    overflow-y: auto;
+  .sheet-header-row .sheet-title { margin-bottom: 0; }
+  .sheet-close-btn {
+    background: none; border: none;
+    width: 22px; height: 22px; display: flex; align-items: center; justify-content: center;
+    color: var(--text-primary); cursor: pointer; flex-shrink: 0; padding: 0;
   }
-  .sheet-handle {
-    width: 36px; height: 4px; border-radius: 999px;
-    background: rgba(255,255,255,0.2);
-    margin: 0 auto 16px auto;
-  }
+  .sheet-close-btn svg { width: 19px; height: 19px; }
+  .sheet-handle { width: 36px; height: 4px; border-radius: 999px; background: rgba(255,255,255,0.2); margin: 0 auto 16px auto; }
   .sheet-title { font-size: 17px; font-weight: 600; margin-bottom: 16px; }
+  #balance-popup-title { font-weight: 400; color: var(--text-secondary); }
   .field-label { font-size: 13px; color: var(--text-secondary); margin: 16px 0 8px 0; display: block; }
   .field-label:first-of-type { margin-top: 0; }
 
   .chip-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-  .chip {
-    border: 1px solid var(--glass-border);
-    background: rgba(255,255,255,0.04);
-    color: var(--text-primary);
-    font-family: var(--font-ui);
-    font-size: 13px;
-    padding: 9px 14px;
-    border-radius: 999px;
-    cursor: pointer;
-  }
-  .chip.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .chip svg { width: 15px; height: 15px; stroke-width: 1.75; }
 
   .amount-input {
-    width: 100%;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-input);
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 28px;
-    padding: 14px 14px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    width: 100%; background: var(--card-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-input); color: var(--text-primary);
+    font-family: var(--font-ui); font-size: 30px; padding: 14px; font-weight: 600;
+    text-align: center; font-variant-numeric: tabular-nums;
   }
   .amount-input:focus { outline: none; border-color: var(--accent); }
 
   .text-input {
-    width: 100%;
-    background: rgba(255,255,255,0.05);
-    border: 1px solid var(--glass-border);
-    border-radius: var(--radius-input);
-    color: var(--text-primary);
-    font-family: var(--font-ui);
-    font-size: 15px;
-    padding: 12px 14px;
+    width: 100%; background: var(--card-elevated); border: 1px solid var(--border);
+    border-radius: var(--radius-input); color: var(--text-primary);
+    font-family: var(--font-ui); font-size: 15px; padding: 12px 14px;
   }
   .text-input:focus { outline: none; border-color: var(--accent); }
 
   .btn-primary {
-    width: 100%;
-    background: var(--accent);
-    color: var(--accent-ink);
-    border: none;
-    border-radius: 999px;
-    font-family: var(--font-ui);
-    font-size: 16px;
-    font-weight: 600;
-    padding: 15px;
-    margin-top: 20px;
-    cursor: pointer;
+    width: 100%; background: var(--accent); color: var(--accent-ink); border: none;
+    border-radius: 999px; font-family: var(--font-ui); font-size: 16px; font-weight: 600;
+    padding: 15px; margin-top: 20px; cursor: pointer;
   }
   .btn-primary:active { transform: scale(0.98); }
-  .btn-primary:disabled { opacity: 0.4; cursor: default; }
+  .btn-primary:disabled { opacity: 0.4; }
 
   .btn-secondary {
-    width: 100%;
-    background: rgba(255,255,255,0.06);
-    color: var(--text-primary);
-    border: 1px solid var(--glass-border);
-    border-radius: 999px;
-    font-family: var(--font-ui);
-    font-size: 15px;
-    padding: 13px;
-    margin-top: 8px;
-    cursor: pointer;
+    width: 100%; background: var(--card-elevated); color: var(--text-primary);
+    border: 1px solid var(--border); border-radius: 999px; font-size: 15px; font-weight: 500;
+    padding: 13px; margin-top: 8px; cursor: pointer;
+  }
+  .btn-danger {
+    width: 100%; background: rgba(255,92,92,0.1); color: var(--expense);
+    border: 1px solid rgba(255,92,92,0.25); border-radius: 999px; font-size: 15px; font-weight: 500;
+    padding: 13px; margin-top: 8px; cursor: pointer;
   }
 
   .error-text { color: var(--expense); font-size: 13px; margin-top: 10px; display: none; }
   .error-text.visible { display: block; }
 
   .skeleton-row {
-    height: 44px;
-    border-radius: 10px;
+    height: 44px; border-radius: 10px;
     background: linear-gradient(90deg, rgba(255,255,255,0.03), rgba(255,255,255,0.07), rgba(255,255,255,0.03));
-    background-size: 200% 100%;
-    animation: shimmer 1.4s infinite;
-    margin-bottom: 8px;
+    background-size: 200% 100%; animation: shimmer 1.4s infinite; margin-bottom: 8px;
   }
   @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-  .top-bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-  .top-bar h1 { font-size: 20px; font-weight: 600; }
-  .link-btn {
-    background: none; border: none; color: var(--text-secondary);
-    font-family: var(--font-ui); font-size: 13px; cursor: pointer; padding: 6px 0;
-  }
+  .history-header { font-size: 15px; font-weight: 400; color: var(--text-secondary); margin-bottom: 14px; }
+  .history-filters { display: flex; align-items: center; gap: 8px; }
+  .history-filters .chip-grid { flex: 1 1 auto; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .history-filters .chip-grid::-webkit-scrollbar { display: none; }
+  .history-filters select.text-input { flex: 0 0 auto; width: auto; padding-right: 34px; }
 
-  .mb-12 { margin-bottom: 12px; }
-  .mb-16 { margin-bottom: 16px; }
-</style>
-<style>
-  /* Состояния оптимистичного UI */
   .row.pending { opacity: 0.55; }
   .row.failed { opacity: 1; }
-  .row.failed .row-title::after {
-    content: ' · не сохранено';
-    color: var(--expense);
-    font-size: 12px;
-  }
-  .stale-hint {
-    text-align: center;
-    font-size: 11px;
-    color: var(--text-tertiary);
-    padding: 6px 0 0 0;
-    font-family: var(--font-mono);
-  }
+  .row.failed .row-title::after { content: ' · не сохранено'; color: var(--expense); font-size: 12px; }
+
   .toast {
-    position: fixed;
-    left: 50%;
-    bottom: calc(100px + env(safe-area-inset-bottom));
+    position: fixed; left: 50%; bottom: calc(108px + env(safe-area-inset-bottom));
     transform: translateX(-50%) translateY(12px);
-    background: #1C1C1E;
-    border: 1px solid var(--glass-border);
-    color: var(--text-primary);
-    font-size: 14px;
-    padding: 11px 18px;
-    border-radius: 999px;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity .2s ease, transform .2s ease;
-    z-index: 100;
-    max-width: 88%;
-    text-align: center;
+    background: var(--card-elevated); border: 1px solid var(--border); color: var(--text-primary);
+    font-size: 14px; padding: 11px 18px; border-radius: 999px;
+    opacity: 0; pointer-events: none; transition: opacity .2s ease, transform .2s ease;
+    z-index: 100; max-width: 88%; text-align: center;
   }
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .toast.error { border-color: var(--expense); }
+
+  .sep { display: inline-block; width: 0.22em; }
+
+  .mb-12 { margin-bottom: 12px; }
+  .mb-16 { margin-bottom: 16px; }
+  .mb-20 { margin-bottom: 20px; }
 </style>
 
 </head>
 <body>
+<div class="bg-drift"><div class="bg-noise"></div></div>
 
 <div id="app">
 
   <section id="screen-dashboard" class="screen active">
-    <div class="top-bar"><h1>Финансы</h1></div>
 
-    <div class="glass-card balance-card">
-      <div class="balance-label">Баланс за период</div>
-      <div class="balance-value" id="dashboard-balance">···</div>
-      <div class="balance-sub">
-        <span><span class="lbl">Доход</span><span class="income" id="dashboard-income">···</span></span>
-        <span><span class="lbl">Расход</span><span class="expense" id="dashboard-expense">···</span></span>
+    <div class="section-label"><span>Баланс</span></div>
+
+    <div class="glass-card tappable-card mb-16" id="period-summary-card" style="padding-top: 21.5px; padding-bottom: 21.5px;">
+      <div class="period-income-expense-row">
+        <div class="income-expense-block">
+          <span class="lbl">Доход</span>
+          <div class="income-expense-value income" id="dashboard-income">···</div>
+        </div>
+        <div class="income-expense-divider"></div>
+        <div class="income-expense-block">
+          <span class="lbl">Расход</span>
+          <div class="income-expense-value expense" id="dashboard-expense">···</div>
+        </div>
       </div>
-      <div class="stale-hint" id="stale-hint" style="display:none;">обновляем…</div>
     </div>
 
-    <div class="segmented mb-16" id="period-selector">
-      <button data-period="today">Сегодня</button>
-      <button data-period="week" class="active">Неделя</button>
-      <button data-period="month">Месяц</button>
-      <button data-period="quarter">Квартал</button>
-      <button data-period="half_year">Полгода</button>
-      <button data-period="year">Год</button>
+    <div class="period-picker-card mb-16" id="period-picker-card" style="margin-bottom: 11px;">
+      <div class="period-scroll" id="period-scroll">
+        <div class="period-item" data-period="today">Сегодня</div>
+        <div class="period-item" data-period="week">Неделя</div>
+        <div class="period-item" data-period="month">Месяц</div>
+        <div class="period-item" data-period="quarter">Квартал</div>
+        <div class="period-item" data-period="half_year">Полгода</div>
+        <div class="period-item" data-period="year">Год</div>
+      </div>
     </div>
 
-    <span class="section-label">Расходы по категориям</span>
-    <div class="glass-card mb-16">
-      <div class="row-list" id="dashboard-expense-breakdown">
+    <div class="section-label section-label-clickable" id="top7-section-label">
+      <span>Топ категорий</span>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="section-chevron"><polyline points="9 18 15 12 9 6"/></svg>
+    </div>
+    <div class="glass-card tappable-card mb-16" id="top7-card">
+      <div class="chip-grid mb-12" id="top7-type-toggle">
+        <button type="button" class="chip selected" data-top7-type="income">Доходы</button>
+        <button type="button" class="chip" data-top7-type="expense">Расходы</button>
+      </div>
+      <div class="row-list" id="dashboard-top7-breakdown">
         <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
       </div>
     </div>
 
-    <span class="section-label">Доходы по категориям</span>
+    <div class="section-label"><span>Динамика</span></div>
     <div class="glass-card">
-      <div class="row-list" id="dashboard-income-breakdown">
+      <select class="text-input mb-12" id="chart-category-select"></select>
+      <div id="history-chart-container">
         <div class="skeleton-row"></div>
       </div>
     </div>
   </section>
 
   <section id="screen-history" class="screen">
-    <div class="top-bar"><h1>История</h1></div>
+    <div class="history-header">История</div>
+    <div class="history-filters mb-12" style="margin-bottom: 17px;">
+      <div class="chip-grid" id="history-type-filter">
+        <button type="button" class="chip selected" data-history-type="all">Все</button>
+        <button type="button" class="chip" data-history-type="income">Доходы</button>
+        <button type="button" class="chip" data-history-type="expense">Расходы</button>
+      </div>
+      <select class="text-input" id="history-period-filter">
+        <option value="all">Всё время</option>
+        <option value="today">Сегодня</option>
+        <option value="week">Неделя</option>
+        <option value="month">Месяц</option>
+        <option value="quarter">Квартал</option>
+        <option value="half_year">Полгода</option>
+        <option value="year">Год</option>
+        <option value="custom">Точная дата</option>
+      </select>
+    </div>
+    <input type="date" class="text-input mb-12" id="history-custom-date" style="display:none; margin-bottom: 17px;">
     <div class="glass-card" id="history-container">
       <div class="skeleton-row"></div><div class="skeleton-row"></div><div class="skeleton-row"></div>
     </div>
@@ -426,232 +524,388 @@
 </div>
 
 <div class="tabbar">
-  <div class="tabbar-inner">
-    <button class="tab-btn active" data-screen="dashboard">
-      <span class="tab-icon">&#9633;</span><span>Дашборд</span>
-    </button>
-    <button class="tab-add" id="btn-open-add">+</button>
-    <button class="tab-btn" data-screen="history">
-      <span class="tab-icon">&#8801;</span><span>История</span>
-    </button>
-  </div>
+  <button class="tab-btn active" data-screen="dashboard" aria-label="Дашборд">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><line x1="12" y1="3.5" x2="12" y2="20.5"/></svg>
+  </button>
+  <button class="tab-add" id="btn-open-add" aria-label="Добавить">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+  </button>
+  <button class="tab-btn" data-screen="history" aria-label="История">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 3v6h6"/><path d="M12 7v5l3 3"/></svg>
+  </button>
 </div>
 
 <div class="sheet-overlay" id="sheet-overlay">
-  <div class="sheet">
+  <div class="sheet sheet-fixed-footer">
     <div class="sheet-handle"></div>
-    <div class="sheet-title">Новая операция</div>
-
-    <div class="segmented mb-12" id="type-selector">
-      <button data-type="expense" class="active">Расход</button>
-      <button data-type="income">Доход</button>
+    <div class="sheet-header-row">
+      <div class="sheet-title" id="sheet-title">Новая операция</div>
+      <button type="button" class="sheet-close-btn" id="btn-cancel-sheet" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
     </div>
 
-    <label class="field-label">Сумма</label>
-    <input type="number" inputmode="decimal" class="amount-input" id="input-amount" placeholder="0" step="0.01">
+    <div class="sheet-scroll-area">
+      <div class="chip-grid mb-12" id="type-selector-chips">
+        <button type="button" class="chip selected" data-type="expense">Расход</button>
+        <button type="button" class="chip" data-type="income">Доход</button>
+      </div>
 
-    <label class="field-label">Категория</label>
-    <div class="chip-grid" id="category-chips"></div>
+      <label class="field-label">Дата</label>
+      <div class="period-scroll" id="date-scroll" style="padding-top: 18px; padding-bottom: 4px;"></div>
+      <input type="date" class="text-input mb-12" id="input-custom-date" style="display:none; margin-top: 14px;">
 
-    <label class="field-label">Дата</label>
-    <div class="segmented" id="date-selector">
-      <button data-date-mode="today" class="active">Сегодня</button>
-      <button data-date-mode="yesterday">Вчера</button>
-      <button data-date-mode="custom">Выбрать</button>
+      <label class="field-label">Сумма</label>
+      <input type="text" inputmode="decimal" class="amount-input" id="input-amount" placeholder="0">
+
+      <label class="field-label">Категория</label>
+      <div class="chip-grid" id="category-chips" style="flex: 1 1 auto; min-height: 90px; overflow-y: auto; align-content: flex-start;"></div>
+
+      <input type="text" class="text-input" id="input-comment" placeholder="Комментарий" maxlength="500" style="margin-top: 16px;">
+
+      <div class="error-text" id="sheet-error"></div>
     </div>
-    <input type="date" class="text-input mb-12" id="input-custom-date" style="display:none; margin-top:8px;">
 
-    <label class="field-label">Комментарий (необязательно)</label>
-    <input type="text" class="text-input" id="input-comment" placeholder="Например: обед с коллегами" maxlength="500">
+    <div class="sheet-fixed-actions">
+      <button class="btn-primary" id="btn-save-transaction">Сохранить</button>
+      <button class="btn-danger" id="btn-delete-transaction" style="display:none;">Удалить операцию</button>
+    </div>
+  </div>
+</div>
 
-    <div class="error-text" id="sheet-error"></div>
+<div class="sheet-overlay" id="balance-period-popup-overlay">
+  <div class="sheet sheet-fixed-footer">
+    <div class="sheet-handle"></div>
+    <div class="sheet-header-row">
+      <div class="sheet-title" id="balance-popup-title"></div>
+      <button type="button" class="sheet-close-btn" id="btn-close-balance-popup" aria-label="Закрыть">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="sheet-scroll-area">
+      <div class="balance-block" style="text-align: center;">
+        <div class="balance-value" id="popup-period-balance" style="font-size: 36px;">···</div>
+        <div class="balance-sub" style="justify-content: center; margin-top: 14px;">
+          <span><span class="lbl">Доход</span> <span class="income" id="popup-period-income">···</span></span>
+          <span><span class="lbl">Расход</span> <span class="expense" id="popup-period-expense">···</span></span>
+        </div>
+      </div>
+      <div class="period-scroll" id="popup-period-scroll" style="margin-top: 20px;">
+        <div class="period-item" data-period="today">Сегодня</div>
+        <div class="period-item" data-period="week">Неделя</div>
+        <div class="period-item" data-period="month">Месяц</div>
+        <div class="period-item" data-period="quarter">Квартал</div>
+        <div class="period-item" data-period="half_year">Полгода</div>
+        <div class="period-item" data-period="year">Год</div>
+        <div class="period-item" data-period="all">Всё время</div>
+      </div>
 
-    <button class="btn-primary" id="btn-save-transaction">Сохранить</button>
-    <button class="btn-secondary" id="btn-cancel-sheet">Отмена</button>
+      <div class="breakdown-popup-divider" style="margin-top: 20px;"></div>
+      <div class="chip-grid mb-12" id="popup-breakdown-type-toggle" style="margin-top: 16px;">
+        <button type="button" class="chip selected" data-breakdown-type="expense">Расходы</button>
+        <button type="button" class="chip" data-breakdown-type="income">Доходы</button>
+      </div>
+      <div class="row-list breakdown-list" id="popup-period-breakdown"></div>
+    </div>
+  </div>
+</div>
+
+<div class="sheet-overlay" id="breakdown-popup-overlay">
+  <div class="sheet sheet-fixed-footer">
+    <div class="sheet-handle"></div>
+    <div class="sheet-title" id="breakdown-popup-title" style="padding: 0 18px;">Расходы</div>
+    <div class="sheet-scroll-area">
+      <div id="breakdown-pie-container"></div>
+      <div class="breakdown-popup-divider"></div>
+      <div class="row-list breakdown-list" id="breakdown-popup-list"></div>
+    </div>
+    <div class="sheet-fixed-actions">
+      <button class="btn-secondary" id="btn-close-breakdown-popup" style="margin-top: 0;">Закрыть</button>
+    </div>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
+<div id="app-error-screen" style="display:none; position:fixed; inset:0; z-index:300; background:var(--bg); color:var(--text-primary); flex-direction:column; align-items:center; justify-content:center; text-align:center; padding:32px; font-family:var(--font-ui);">
+  <div style="font-size:15px; color:var(--text-secondary); max-width:320px;" id="app-error-text">Не удалось загрузить приложение.</div>
+</div>
+
 <script>
 /* ===========================================================================
-   Finance Tracker — Mini App
-
-   Хостится отдельно от backend (не через Apps Script doGet): GAS оборачивает
-   HTML во вложенный iframe на чужом домене, а Telegram не отдаёт initData
-   такому фрейму — initData всегда приходит пустым. Здесь страница работает
-   на верхнем уровне, поэтому авторизация проходит нормально.
-
-   Модель работы с данными:
-   1. При старте мгновенно рисуем последнее известное состояние из
-      localStorage (если есть) — приложение выглядит загруженным сразу.
-   2. Параллельно один bootstrap-запрос приносит актуальные категории и
-      все активные транзакции.
-   3. Дашборд и переключение периодов считаются локально из этих транзакций,
-      без обращений к серверу. Сырьё приходит с сервера, агрегация —
-      детерминированная, повторяет серверную логику один в один.
-   4. Запись оптимистична: изменение видно сразу, запрос уходит в фон,
-      при ошибке — откат и уведомление.
+   Finance Tracker — Telegram Mini App (фронтенд)
+   Бэкенд: Google Apps Script (Api.gs / Core.gs / Services.gs).
 =========================================================================== */
 
-var GAS_API_URL = 'https://script.google.com/macros/s/AKfycbyZ0YFZeiZXJ4JOfH714-Etdjdqq7MwOm3pzgI5Z-hGs2GWZscEr4bLS4Qnj8YtPpcC/exec?api=miniapp';
-var CACHE_KEY = 'ft_cache_v1';
+var THIN_SPACE = '\u200A'; // волосяная шпация — ещё уже тонкой, минимальный видимый разрыв
 
-var TG_INIT_DATA = null;
+/* ------------------------------------------------------------------ */
+/* Категории: иконка (Lucide) + приглушённый цвет — по имени, портируемо */
+/* ------------------------------------------------------------------ */
 
-var state = {
-  currentPeriod: 'week',
-  currentType: 'expense',
-  selectedCategoryId: null,
-  selectedDateMode: 'today',
-  categories: { expense: [], income: [] },
-  transactions: [],
-  categoryNames: {},
-  serverToday: null,
-  loaded: false
+var CATEGORY_META = {
+  'Жильё и ЖКХ':        { icon: 'home',           color: '#8FA6FF' },
+  'Подписки':           { icon: 'repeat',         color: '#9E9EF0' },
+  'Кафе и рестораны':   { icon: 'utensils',       color: '#FF9E7A' },
+  'Алкоголь':           { icon: 'wine',           color: '#D98CD1' },
+  'Фитнес':             { icon: 'dumbbell',       color: '#6FBF73' },
+  'Автомобиль':         { icon: 'car',            color: '#7FD1E0' },
+  'Транспорт':          { icon: 'bus',            color: '#8CC7E8' },
+  'Развлечения':        { icon: 'ticket',         color: '#E3B341' },
+  'Продукты':           { icon: 'shopping-cart',  color: '#7ED9C0' },
+  'Здоровье':           { icon: 'heart-pulse',    color: '#FF8FA3' },
+  'Красота и уход':     { icon: 'sparkles',       color: '#E0A8C0' },
+  'Одежда':             { icon: 'shirt',          color: '#B98CE0' },
+  'Дом':                { icon: 'sofa',           color: '#C9A876' },
+  'Крупные покупки':    { icon: 'package',        color: '#F2A65A' },
+  'Путешествия':        { icon: 'plane',          color: '#5FC9A8' },
+  'Образование':        { icon: 'graduation-cap', color: '#8FA6FF' },
+  'Семья':              { icon: 'users',          color: '#E08585' },
+  'Питомцы':            { icon: 'paw-print',      color: '#D9C77A' },
+  'Подарки':            { icon: 'gift',           color: '#E0A8C0' },
+  'Прочее':             { icon: 'ellipsis',       color: '#9EA3A8' },
+  'Зарплата':           { icon: 'wallet',         color: '#6FBF73' },
+  'Фриланс':            { icon: 'laptop',         color: '#7FD1E0' },
+  'Бизнес':             { icon: 'briefcase',      color: '#8FA6FF' },
+  'Инвестиции и вклады':{ icon: 'trending-up',    color: '#7ED9C0' },
+  'Другое':             { icon: 'ellipsis',       color: '#9EA3A8' }
 };
+var DEFAULT_CATEGORY_META = { icon: 'circle', color: '#9EA3A8' };
+
+function categoryMeta(name) { return CATEGORY_META[name] || DEFAULT_CATEGORY_META; }
+
+function categoryIconHtml(name, size) {
+  var meta = categoryMeta(name);
+  return '<div class="row-icon">' +
+    '<i data-lucide="' + meta.icon + '" style="color:' + meta.color + '; filter: drop-shadow(0 0 5px ' + meta.color + '99);"></i></div>';
+}
 
 /* ------------------------------------------------------------------ */
-/* Транспорт                                                           */
+/* API — GAS Web App backend                                            */
 /* ------------------------------------------------------------------ */
 
+/**
+ * URL опубликованного GAS Web App (Deploy → Manage deployments → Web app).
+ * При пересоздании деплоя (не "New version", а именно новый деплой) —
+ * обновить здесь, URL меняется.
+ */
+var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbyZ0YFZeiZXJ4JOfH714-Etdjdqq7MwOm3pzgI5Z-hGs2GWZscEr4bLS4Qnj8YtPpcC/exec';
+
+/**
+ * Telegram передаёт initData через Telegram.WebApp — доступно только внутри
+ * реального Telegram-клиента (бот/мини-апп), не в обычном браузере.
+ */
+function getInitData_() {
+  return (window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initData) || '';
+}
+
+/**
+ * Тонкий JSON-RPC клиент к doPost()'у Api.gs.
+ * initData подставляется автоматически первым аргументом — вызывающему коду
+ * (как и раньше, во времена мока) не нужно передавать его самостоятельно.
+ *
+ * Content-Type: text/plain — намеренно, не application/json: иначе браузер
+ * шлёт CORS preflight (OPTIONS), а Apps Script Web App его не обрабатывает
+ * (см. комментарий в начале Api.gs).
+ */
 function callServer(action) {
   var args = Array.prototype.slice.call(arguments, 1);
-  return fetch(GAS_API_URL, {
+  var fullArgs = [getInitData_()].concat(args);
+
+  return fetch(API_BASE_URL + '?api=miniapp', {
     method: 'POST',
-    // text/plain — "simple request", не вызывает CORS preflight,
-    // который Apps Script не обрабатывает.
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-    body: JSON.stringify({ action: action, args: [TG_INIT_DATA].concat(args) })
+    body: JSON.stringify({ action: action, args: fullArgs })
   })
-    .then(function (r) {
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return r.json();
+    .then(function (res) {
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
     })
-    .then(function (json) {
-      if (!json.success) throw new Error(json.error || 'Ошибка сервера');
-      return json.result;
+    .then(function (data) {
+      if (!data.success) throw new Error(data.error || 'Server error');
+      return data.result;
     });
 }
 
 /* ------------------------------------------------------------------ */
-/* Локальный кэш между запусками                                       */
+/* Состояние                                                             */
 /* ------------------------------------------------------------------ */
 
-function saveCache() {
-  try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify({
-      categories: state.categories,
-      transactions: state.transactions.filter(function (t) { return !t.__pending && !t.__failed; }),
-      serverToday: state.serverToday,
-      savedAt: Date.now()
-    }));
-  } catch (e) { /* приватный режим или переполнение — не критично */ }
-}
+var PERIODS = ['today', 'week', 'month', 'quarter', 'half_year', 'year'];
 
-function loadCache() {
-  try {
-    var raw = localStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch (e) { return null; }
-}
+var state = {
+  currentPeriod: 'month',
+  currentType: 'expense',
+  selectedCategoryId: null,
+  selectedDateValue: 'today',
+  categories: { expense: [], income: [] },
+  transactions: [],
+  categoryNames: {},
+  serverToday: null,
+  loaded: false,
+  editingTransactionId: null,
+  lastDashboardValues: { balance: 0, income: 0, expense: 0 },
+  lastBreakdown: { expense: [], income: [] },
+  top7Type: 'income',
+  lastTop7Values: {},
+  historyTypeFilter: 'all',
+  historyPeriodFilter: 'all',
+  historyCustomDate: null,
+  popupBreakdownType: 'expense'
+};
 
 /* ------------------------------------------------------------------ */
-/* Периоды — та же логика, что на сервере (неделя с понедельника)      */
+/* Периоды — КАЛЕНДАРНЫЕ границы, зеркалит resolveAnalyticsPeriod из     */
+/* Services.gs (неделя с понедельника, месяц/квартал/полугодие/год —     */
+/* календарные, не скользящие окна) — тот же источник истины, что у GAS. */
 /* ------------------------------------------------------------------ */
 
-function todayParts() {
+function getTodayParts_() {
   var s = (state.serverToday || new Date().toISOString().slice(0, 10)).split('-');
   return { year: +s[0], month: +s[1], day: +s[2] };
 }
-
-function fmtCal(p) {
-  return p.year + '-' + String(p.month).padStart(2, '0') + '-' + String(p.day).padStart(2, '0');
-}
-
-function addDaysCal(p, days) {
-  var d = new Date(Date.UTC(p.year, p.month - 1, p.day) + days * 86400000);
+function addDaysCal_(parts, days) {
+  var d = new Date(Date.UTC(parts.year, parts.month - 1, parts.day) + days * 86400000);
   return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
 }
-
-function isoWeekday(p) {
-  var d = new Date(Date.UTC(p.year, p.month - 1, p.day)).getUTCDay();
-  return d === 0 ? 7 : d;
+function isoWeekday_(parts) {
+  var day = new Date(Date.UTC(parts.year, parts.month - 1, parts.day)).getUTCDay();
+  return day === 0 ? 7 : day;
 }
-
-function lastDayOfMonth(year, month) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
+function fmtCal_(p) { return p.year + '-' + pad2Cal_(p.month) + '-' + pad2Cal_(p.day); }
+function pad2Cal_(n) { return (n < 10 ? '0' : '') + n; }
+function lastDayOfMonthCal_(year, month) { return new Date(Date.UTC(year, month, 0)).getUTCDate(); }
 
 function resolvePeriod(key) {
-  var t = todayParts();
+  var today = getTodayParts_();
   switch (key) {
-    case 'today':
-      return { startDate: fmtCal(t), endDate: fmtCal(t) };
-    case 'week': {
-      var mon = addDaysCal(t, -(isoWeekday(t) - 1));
-      return { startDate: fmtCal(mon), endDate: fmtCal(addDaysCal(mon, 6)) };
+    case 'today': {
+      var d = fmtCal_(today);
+      return { startDate: d, endDate: d };
     }
-    case 'month':
+    case 'week': {
+      var monday = addDaysCal_(today, -(isoWeekday_(today) - 1));
+      return { startDate: fmtCal_(monday), endDate: fmtCal_(addDaysCal_(monday, 6)) };
+    }
+    case 'month': {
       return {
-        startDate: fmtCal({ year: t.year, month: t.month, day: 1 }),
-        endDate: fmtCal({ year: t.year, month: t.month, day: lastDayOfMonth(t.year, t.month) })
+        startDate: fmtCal_({ year: today.year, month: today.month, day: 1 }),
+        endDate: fmtCal_({ year: today.year, month: today.month, day: lastDayOfMonthCal_(today.year, today.month) })
       };
+    }
     case 'quarter': {
-      var qs = Math.floor((t.month - 1) / 3) * 3 + 1, qe = qs + 2;
+      var qs = Math.floor((today.month - 1) / 3) * 3 + 1, qe = qs + 2;
       return {
-        startDate: fmtCal({ year: t.year, month: qs, day: 1 }),
-        endDate: fmtCal({ year: t.year, month: qe, day: lastDayOfMonth(t.year, qe) })
+        startDate: fmtCal_({ year: today.year, month: qs, day: 1 }),
+        endDate: fmtCal_({ year: today.year, month: qe, day: lastDayOfMonthCal_(today.year, qe) })
       };
     }
     case 'half_year': {
-      var hs = t.month <= 6 ? 1 : 7, he = hs + 5;
+      var hs = today.month <= 6 ? 1 : 7, he = hs + 5;
       return {
-        startDate: fmtCal({ year: t.year, month: hs, day: 1 }),
-        endDate: fmtCal({ year: t.year, month: he, day: lastDayOfMonth(t.year, he) })
+        startDate: fmtCal_({ year: today.year, month: hs, day: 1 }),
+        endDate: fmtCal_({ year: today.year, month: he, day: lastDayOfMonthCal_(today.year, he) })
       };
     }
-    case 'year':
+    case 'year': {
       return {
-        startDate: fmtCal({ year: t.year, month: 1, day: 1 }),
-        endDate: fmtCal({ year: t.year, month: 12, day: 31 })
+        startDate: fmtCal_({ year: today.year, month: 1, day: 1 }),
+        endDate: fmtCal_({ year: today.year, month: 12, day: 31 })
       };
-    default:
-      return resolvePeriod('week');
+    }
+    case 'all': {
+      // Клиентское расширение (бэкенд такого периода не знает) — весь
+      // диапазон загруженных транзакций (см. apiBootstrap: последние 365 дней).
+      return { startDate: '0000-01-01', endDate: fmtCal_(today) };
+    }
+    default: {
+      var t = fmtCal_(today);
+      return { startDate: t, endDate: t };
+    }
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* Локальный расчёт дашборда                                           */
+/* Форматирование чисел — без валюты, тонкая шпация как разделитель      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Разделитель разрядов задаётся шириной через CSS (<span class="sep">),
+ * а не Unicode-символом пробела: в моноширинном шрифте ЛЮБОЙ пробельный
+ * символ рисуется той же фиксированной шириной, что и цифра — поэтому
+ * никакой "тонкий" пробел не выглядит тонким. Возвращает HTML — вставлять
+ * через innerHTML, не textContent.
+ */
+function formatNumber(value, decimals, includeCurrency) {
+  var num = Number(value) || 0;
+  var isNeg = num < 0;
+  num = Math.abs(num);
+  var hasFraction = decimals !== undefined ? decimals > 0 : Math.round(num * 100) % 100 !== 0;
+  var fixed = num.toFixed(hasFraction ? 2 : 0);
+  var parts = fixed.split('.');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '<span class="sep"></span>');
+  var suffix = includeCurrency === false ? '' : ' ₽';
+  return (isNeg ? '\u2212' : '') + parts.join(',') + suffix;
+}
+
+/** Живое форматирование поля ввода суммы по мере печати. */
+function formatAmountInput(raw) {
+  raw = raw.replace(new RegExp(THIN_SPACE, 'g'), '').replace(/[^\d.,]/g, '').replace(',', '.');
+  var dot = raw.indexOf('.');
+  if (dot !== -1) raw = raw.slice(0, dot + 1) + raw.slice(dot + 1).replace(/\./g, '');
+  var split = raw.split('.');
+  var intPart = split[0].replace(/^0+(?=\d)/, '');
+  var grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, THIN_SPACE);
+  return split.length > 1 ? grouped + '.' + split[1] : grouped;
+}
+
+function parseAmountInput(formatted) {
+  return Number(formatted.replace(new RegExp(THIN_SPACE, 'g'), ''));
+}
+
+/* ------------------------------------------------------------------ */
+/* Rolling-анимация чисел (как счётчик/табло) при смене периода          */
+/* ------------------------------------------------------------------ */
+
+function animateNumber(el, from, to, durationMs, includeCurrency, autoFit) {
+  // Знаки после запятой фиксируются ОДИН раз, по финальному значению —
+  // иначе промежуточные дробные числа при интерполяции то показывают,
+  // то прячут копейки посреди анимации (мерцание разрядов).
+  var decimals = Math.round(to * 100) % 100 !== 0 ? 2 : 0;
+  var start = performance.now();
+  function step(now) {
+    var t = Math.min(1, (now - start) / durationMs);
+    var eased = 1 - Math.pow(1 - t, 3); // ease-out cubic
+    var current = from + (to - from) * eased;
+    el.innerHTML = formatNumber(current, decimals, includeCurrency);
+    if (autoFit) fitBalanceFont(el, autoFit.max, autoFit.min);
+    if (t < 1) requestAnimationFrame(step);
+    else {
+      el.innerHTML = formatNumber(to, decimals, includeCurrency);
+      if (autoFit) fitBalanceFont(el, autoFit.max, autoFit.min);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+/* ------------------------------------------------------------------ */
+/* Дашборд                                                               */
 /* ------------------------------------------------------------------ */
 
 function computeDashboard(periodKey) {
   var p = resolvePeriod(periodKey);
-  var income = 0, expenses = 0;
-  var byExpense = {}, byIncome = {};
+  var income = 0, expenses = 0, byExpense = {}, byIncome = {};
 
   state.transactions.forEach(function (t) {
     if (t.__failed) return;
-    var date = t.operation_date;
-    if (date < p.startDate || date > p.endDate) return;
-
+    if (t.operation_date < p.startDate || t.operation_date > p.endDate) return;
     var amount = Number(t.amount) || 0;
-    if (t.type === 'income') {
-      income += amount;
-      byIncome[t.category_id] = (byIncome[t.category_id] || 0) + amount;
-    } else {
-      expenses += amount;
-      byExpense[t.category_id] = (byExpense[t.category_id] || 0) + amount;
-    }
+    if (t.type === 'income') { income += amount; byIncome[t.category_id] = (byIncome[t.category_id] || 0) + amount; }
+    else { expenses += amount; byExpense[t.category_id] = (byExpense[t.category_id] || 0) + amount; }
   });
 
   return {
-    totals: {
-      income: round2(income),
-      expenses: round2(expenses),
-      balance: round2(income - expenses)
-    },
+    totals: { income: round2(income), expenses: round2(expenses), balance: round2(income - expenses) },
     expenseByCategory: breakdown(byExpense),
     incomeByCategory: breakdown(byIncome)
   };
@@ -665,60 +919,262 @@ function breakdown(map) {
 
 function round2(v) { return Math.round(v * 100) / 100; }
 
+function renderDashboard(animate) {
+  var d = computeDashboard(state.currentPeriod);
+  state.lastBreakdown = { expense: d.expenseByCategory, income: d.incomeByCategory };
+
+  if (animate) {
+    animateNumber(document.getElementById('dashboard-income'), state.lastDashboardValues.income, d.totals.income, 650, undefined, { max: 30, min: 15 });
+    animateNumber(document.getElementById('dashboard-expense'), state.lastDashboardValues.expense, d.totals.expenses, 650, undefined, { max: 30, min: 15 });
+  } else {
+    document.getElementById('dashboard-income').innerHTML = formatNumber(d.totals.income);
+    fitBalanceFont(document.getElementById('dashboard-income'), 30, 15);
+    document.getElementById('dashboard-expense').innerHTML = formatNumber(d.totals.expenses);
+    fitBalanceFont(document.getElementById('dashboard-expense'), 30, 15);
+  }
+  state.lastDashboardValues = { balance: d.totals.balance, income: d.totals.income, expense: d.totals.expenses };
+
+  if (animate) {
+    renderBreakdownSectionAnimated('dashboard-top7-breakdown', state.lastBreakdown[state.top7Type]);
+  } else {
+    renderBreakdownSection('dashboard-top7-breakdown', state.lastBreakdown[state.top7Type]);
+    createIconsIn(document.getElementById('dashboard-top7-breakdown'));
+  }
+}
+
+/**
+ * Превью топ-7 категорий выбранного типа (Расходы/Доходы — переключатель
+ * внутри карточки). Полный список со всеми категориями и круговой
+ * диаграммой — по тапу на карточку (см. openBreakdownPopup).
+ */
+function renderBreakdownSection(containerId, items) {
+  var container = document.getElementById(containerId);
+  container.classList.add('breakdown-list');
+
+  if (!items || !items.length) {
+    container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+    return;
+  }
+
+  var total = items.reduce(function (s, i) { return s + i.amount; }, 0);
+  var visible = items.slice(0, 5);
+
+  container.innerHTML = visible.map(function (item) {
+    var percent = total > 0 ? Math.round(item.amount / total * 100) : 0;
+    return '<div class="row" data-category-id="' + escapeHtml(item.categoryId) + '"><div class="row-left">' +
+      categoryIconHtml(item.categoryName) +
+      '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
+      '</div><div class="row-amount-inline">' +
+      '<span class="row-percent">' + percent + '%</span>' +
+      '<span class="row-amount" data-category-id="' + escapeHtml(item.categoryId) + '">' + formatNumber(item.amount) + '</span>' +
+      '</div></div>';
+  }).join('');
+}
+
+/** Как и числа Дохода/Расхода — плавный счёт от предыдущего значения к новому,
+    вместо перекрёстного затухания всего списка. */
+function renderBreakdownSectionAnimated(containerId, items) {
+  var prevValues = state.lastTop7Values || {};
+  renderBreakdownSection(containerId, items);
+  var container = document.getElementById(containerId);
+  createIconsIn(container);
+
+  var nextValues = {};
+  (items || []).slice(0, 5).forEach(function (item) {
+    nextValues[item.categoryId] = item.amount;
+    var el = container.querySelector('.row-amount[data-category-id="' + item.categoryId + '"]');
+    if (!el) return;
+    var from = prevValues.hasOwnProperty(item.categoryId) ? prevValues[item.categoryId] : 0;
+    animateNumber(el, from, item.amount, 650);
+  });
+  state.lastTop7Values = nextValues;
+}
+
+/** Переключатель Расходы/Доходы внутри карточки Топ-7 — мгновенный рендер из кэша, без запроса. */
+document.querySelectorAll('#top7-type-toggle .chip').forEach(function (btn) {
+  btn.addEventListener('click', function (e) {
+    e.stopPropagation(); // не открывать попап при переключении таба
+    document.querySelectorAll('#top7-type-toggle .chip').forEach(function (b) { b.classList.remove('selected'); });
+    btn.classList.add('selected');
+    state.top7Type = btn.getAttribute('data-top7-type');
+    renderBreakdownSection('dashboard-top7-breakdown', state.lastBreakdown[state.top7Type]);
+    createIconsIn(document.getElementById('dashboard-top7-breakdown'));
+
+    // График не имеет своего переключателя — следует за топ-категориями.
+    chartState.categoryId = 'all';
+    populateChartCategorySelect();
+    renderTrendChart();
+  });
+});
+
 /* ------------------------------------------------------------------ */
-/* Отрисовка                                                           */
+/* История                                                               */
 /* ------------------------------------------------------------------ */
 
-function formatMoney(v) {
-  return (Number(v) || 0).toLocaleString('ru-RU', { maximumFractionDigits: 2 }) + ' \u20BD';
-}
+var historyDirty = true;
 
 function formatDateLabel(dateStr) {
   var t = state.serverToday || new Date().toISOString().slice(0, 10);
   if (dateStr === t) return 'Сегодня';
   var parts = t.split('-');
-  var y = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]) - 86400000)
-    .toISOString().slice(0, 10);
+  var y = new Date(Date.UTC(+parts[0], +parts[1] - 1, +parts[2]) - 86400000).toISOString().slice(0, 10);
   if (dateStr === y) return 'Вчера';
   var d = dateStr.split('-');
   return d[2] + '.' + d[1] + '.' + d[0];
 }
 
-function escapeHtml(str) {
-  if (str === null || str === undefined) return '';
-  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+/* ------------------------------------------------------------------ */
+/* График помесячной динамики (Истории) — линия тренда за всё время,    */
+/* источник данных: тип (расход/доход) + конкретная категория или "все" */
+/* ------------------------------------------------------------------ */
+
+var chartState = { categoryId: 'all' };
+
+document.getElementById('chart-category-select').addEventListener('change', function (e) {
+  chartState.categoryId = e.target.value;
+  renderTrendChart();
+});
+
+function populateChartCategorySelect() {
+  var select = document.getElementById('chart-category-select');
+  var categories = state.categories[state.top7Type] || [];
+  var allLabel = state.top7Type === 'expense' ? 'Все расходы' : 'Все доходы';
+  select.innerHTML = '<option value="all">' + allLabel + '</option>' +
+    categories.map(function (c) { return '<option value="' + c.id + '">' + escapeHtml(c.name) + '</option>'; }).join('');
+  select.dataset.focusColor = state.top7Type === 'expense' ? 'var(--expense)' : 'var(--income-soft)';
+  select.style.borderColor = '';
 }
 
-function renderDashboard() {
-  var d = computeDashboard(state.currentPeriod);
-  document.getElementById('dashboard-balance').textContent = formatMoney(d.totals.balance);
-  document.getElementById('dashboard-income').textContent = formatMoney(d.totals.income);
-  document.getElementById('dashboard-expense').textContent = formatMoney(d.totals.expenses);
-  renderBreakdown('dashboard-expense-breakdown', d.expenseByCategory);
-  renderBreakdown('dashboard-income-breakdown', d.incomeByCategory);
+(function () {
+  var chartSelect = document.getElementById('chart-category-select');
+  chartSelect.addEventListener('focus', function () {
+    chartSelect.style.borderColor = chartSelect.dataset.focusColor || '';
+  });
+  chartSelect.addEventListener('blur', function () {
+    chartSelect.style.borderColor = '';
+  });
+})();
+
+var MONTH_NAMES_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+
+function computeMonthlyTrend(type, categoryId) {
+  // Минимум — месяц. Расширяется только когда выбранный период крупнее
+  // месяца (полгода/год) — для Сегодня/Недели/Месяца/Квартала график не сужается.
+  var effectiveKey = (state.currentPeriod === 'half_year' || state.currentPeriod === 'year')
+    ? state.currentPeriod : 'month';
+  var periodRange = resolvePeriod(effectiveKey);
+  var byMonth = {};
+  state.transactions.forEach(function (t) {
+    if (t.__failed) return;
+    if (t.type !== type) return;
+    if (categoryId !== 'all' && t.category_id !== categoryId) return;
+    if (t.operation_date < periodRange.startDate || t.operation_date > periodRange.endDate) return;
+    var monthKey = t.operation_date.slice(0, 7); // YYYY-MM
+    byMonth[monthKey] = (byMonth[monthKey] || 0) + Number(t.amount);
+  });
+
+  var months = Object.keys(byMonth).sort();
+  // Последние 6 месяцев с данными — иначе на узком экране подписи налезают друг на друга.
+  months = months.slice(-6);
+
+  return months.map(function (key) {
+    var parts = key.split('-');
+    return { monthKey: key, label: MONTH_NAMES_SHORT[+parts[1] - 1], total: round2(byMonth[key]) };
+  });
 }
 
-function renderBreakdown(containerId, items) {
-  var el = document.getElementById(containerId);
-  if (!items.length) {
-    el.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+/** Сглаженная линия через кубические Безье с контрольными точками на серединах между соседями. */
+function buildSmoothLinePath(points) {
+  if (points.length < 2) return '';
+  var d = 'M ' + points[0].x + ' ' + points[0].y;
+  for (var i = 0; i < points.length - 1; i++) {
+    var p0 = points[i], p1 = points[i + 1];
+    var midX = (p0.x + p1.x) / 2;
+    d += ' C ' + midX + ' ' + p0.y + ', ' + midX + ' ' + p1.y + ', ' + p1.x + ' ' + p1.y;
+  }
+  return d;
+}
+
+function renderTrendChart() {
+  var container = document.getElementById('history-chart-container');
+  var trend = computeMonthlyTrend(state.top7Type, chartState.categoryId);
+
+  if (trend.length === 0) {
+    container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
     return;
   }
-  el.innerHTML = items.map(function (item) {
-    return '<div class="row"><div class="row-left">' +
-      '<div class="row-icon">' + escapeHtml((item.categoryName || '?').charAt(0)) + '</div>' +
-      '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
-      '</div><div class="row-amount">' + formatMoney(item.amount) + '</div></div>';
+  if (trend.length === 1) {
+    container.innerHTML = '<div class="empty-state">Недостаточно данных для графика — нужно хотя бы 2 месяца</div>';
+    return;
+  }
+
+  var width = 320, height = 140, padLeft = 8, padRight = 8, padTop = 24, padBottom = 22;
+  var plotW = width - padLeft - padRight, plotH = height - padTop - padBottom;
+  var maxVal = Math.max.apply(null, trend.map(function (t) { return t.total; })) || 1;
+  var minVal = 0;
+
+  var points = trend.map(function (t, i) {
+    var x = padLeft + (i / (trend.length - 1)) * plotW;
+    var y = padTop + plotH - ((t.total - minVal) / (maxVal - minVal || 1)) * plotH;
+    return { x: x, y: y, label: t.label, total: t.total };
+  });
+
+  var color = state.top7Type === 'income' ? '#39FF88' : '#FF4568';
+  var linePath = buildSmoothLinePath(points);
+
+  var dots = points.map(function (p) {
+    return '<circle cx="' + p.x + '" cy="' + p.y + '" r="3.5" fill="' + color + '" />';
   }).join('');
+
+  var valueLabels = points.map(function (p) {
+    return '<text x="' + p.x + '" y="' + (p.y - 10) + '" text-anchor="middle" class="chart-value-label">' +
+      formatCompact(p.total) + '</text>';
+  }).join('');
+
+  var monthLabels = points.map(function (p) {
+    return '<text x="' + p.x + '" y="' + (height - 4) + '" text-anchor="middle" class="chart-month-label">' + p.label + '</text>';
+  }).join('');
+
+  var glowStrength = '0 0 6px ' + color + '55';
+
+  container.innerHTML =
+    '<svg viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" style="filter: drop-shadow(' + glowStrength + ');">' +
+    '<path d="' + linePath + '" fill="none" stroke="' + color + '" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>' +
+    dots + valueLabels + monthLabels +
+    '</svg>';
+}
+
+/** Короткая запись суммы для подписей на графике: 12 400 -> 12.4к */
+function formatCompact(value) {
+  if (Math.abs(value) >= 1000) return (value / 1000).toFixed(1).replace('.0', '') + 'к';
+  return String(Math.round(value));
+}
+
+function getFilteredHistoryTransactions() {
+  var list = state.transactions;
+  if (state.historyTypeFilter !== 'all') {
+    list = list.filter(function (t) { return t.type === state.historyTypeFilter; });
+  }
+  if (state.historyPeriodFilter === 'custom') {
+    if (state.historyCustomDate) {
+      list = list.filter(function (t) { return t.operation_date === state.historyCustomDate; });
+    }
+  } else if (state.historyPeriodFilter !== 'all') {
+    var range = resolvePeriod(state.historyPeriodFilter);
+    list = list.filter(function (t) { return t.operation_date >= range.startDate && t.operation_date <= range.endDate; });
+  }
+  return list;
 }
 
 function renderHistory() {
   var el = document.getElementById('history-container');
-  var list = state.transactions;
-
-  if (!list.length) {
+  if (!state.transactions.length) {
     el.innerHTML = '<div class="empty-state">Пока нет операций.<br>Нажмите + , чтобы добавить первую.</div>';
+    return;
+  }
+  var list = getFilteredHistoryTransactions();
+  if (!list.length) {
+    el.innerHTML = '<div class="empty-state">Нет операций по этому фильтру.</div>';
     return;
   }
 
@@ -735,40 +1191,232 @@ function renderHistory() {
     groups[date].forEach(function (t) {
       var isIncome = t.type === 'income';
       var cls = t.__pending ? ' pending' : (t.__failed ? ' failed' : '');
+      var catName = state.categoryNames[t.category_id] || t.category_id;
       html += '<div class="row' + cls + '" data-tx-id="' + escapeHtml(t.id) + '">' +
-        '<div class="row-left">' +
-          '<div class="row-icon">' + (isIncome ? '&#8593;' : '&#8595;') + '</div>' +
-          '<div class="row-text">' +
-            '<div class="row-title">' + escapeHtml(state.categoryNames[t.category_id] || t.category_id) + '</div>' +
-            (t.comment ? '<div class="row-sub">' + escapeHtml(t.comment) + '</div>' : '') +
-          '</div>' +
-        '</div>' +
-        '<div class="row-amount ' + (isIncome ? 'income' : 'expense') + '">' +
-          (isIncome ? '+' : '\u2212') + formatMoney(t.amount) +
-        '</div></div>';
+        '<div class="row-left">' + categoryIconHtml(catName) +
+        '<div class="row-text"><div class="row-title">' + escapeHtml(catName) + '</div>' +
+        (t.comment ? '<div class="row-sub">' + escapeHtml(t.comment) + '</div>' : '') + '</div></div>' +
+        '<div class="row-amount ' + (isIncome ? 'income' : 'expense') + '">' + (isIncome ? '+' : '\u2212') + formatNumber(t.amount) + '</div></div>';
     });
     html += '</div>';
   });
 
   el.innerHTML = html;
-
+  createIconsIn(el);
   el.querySelectorAll('.row[data-tx-id]').forEach(function (row) {
-    row.addEventListener('click', function () {
-      cancelTransactionOptimistic(row.getAttribute('data-tx-id'));
-    });
+    row.addEventListener('click', function () { openEditSheet(row.getAttribute('data-tx-id')); });
   });
 }
 
-function renderAll() {
-  renderDashboard();
+document.querySelectorAll('#history-type-filter .chip').forEach(function (chip) {
+  chip.addEventListener('click', function () {
+    document.querySelectorAll('#history-type-filter .chip').forEach(function (c) { c.classList.remove('selected'); });
+    chip.classList.add('selected');
+    state.historyTypeFilter = chip.getAttribute('data-history-type');
+    renderHistory();
+  });
+});
+
+document.getElementById('history-period-filter').addEventListener('change', function (e) {
+  state.historyPeriodFilter = e.target.value;
+  var dateInput = document.getElementById('history-custom-date');
+  if (e.target.value === 'custom') {
+    dateInput.style.display = 'block';
+    if (dateInput.value) state.historyCustomDate = dateInput.value;
+  } else {
+    dateInput.style.display = 'none';
+  }
   renderHistory();
+});
+
+document.getElementById('history-custom-date').addEventListener('change', function (e) {
+  state.historyCustomDate = e.target.value;
+  renderHistory();
+});
+
+function createIconsIn(container) {
+  if (typeof lucide !== 'undefined') lucide.createIcons({ nameAttr: 'data-lucide', attrs: {}, container: container });
+}
+
+/* ------------------------------------------------------------------ */
+/* Попап с круговой диаграммой и полным списком категорий               */
+/* ------------------------------------------------------------------ */
+
+document.getElementById('top7-section-label').addEventListener('click', function () { openBreakdownPopup(state.top7Type); });
+document.getElementById('top7-card').addEventListener('click', function (e) {
+  var card = e.currentTarget; // захватываем сейчас — currentTarget станет null сразу после этого обработчика
+  openBreakdownPopup(state.top7Type);
+  card.classList.remove('ripple-active');
+  void card.offsetWidth; // форсируем reflow, чтобы анимация перезапустилась при повторных тапах
+  card.classList.add('ripple-active');
+  setTimeout(function () { card.classList.remove('ripple-active'); }, 500);
+});
+document.getElementById('btn-close-breakdown-popup').addEventListener('click', function () {
+  document.getElementById('breakdown-popup-overlay').classList.remove('open');
+});
+document.getElementById('breakdown-popup-overlay').addEventListener('click', function (e) {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove('open');
+});
+
+function openBreakdownPopup(kind) {
+  var items = state.lastBreakdown[kind] || [];
+  document.getElementById('breakdown-popup-title').textContent = kind === 'expense' ? 'Расходы' : 'Доходы';
+
+  document.getElementById('breakdown-pie-container').innerHTML =
+    buildPieChartSvg(items) + '<div class="pie-tooltip" id="pie-tooltip"></div>';
+  attachPieTooltip(document.getElementById('breakdown-pie-container'));
+
+  var total = items.reduce(function (s, i) { return s + i.amount; }, 0);
+  var list = document.getElementById('breakdown-popup-list');
+  if (!items.length) {
+    list.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+  } else {
+    list.innerHTML = items.map(function (item) {
+      var percent = total > 0 ? Math.round(item.amount / total * 100) : 0;
+      return '<div class="row"><div class="row-left">' +
+        categoryIconHtml(item.categoryName) +
+        '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
+        '</div><div class="row-amount-inline">' +
+        '<span class="row-percent">' + percent + '%</span>' +
+        '<span class="row-amount">' + formatNumber(item.amount) + '</span>' +
+        '</div></div>';
+    }).join('');
+    createIconsIn(list);
+  }
+
+  document.getElementById('breakdown-popup-overlay').classList.add('open');
+}
+
+/**
+ * Круговая диаграмма через слои SVG <circle> со stroke-dasharray —
+ * без внешних библиотек. Каждая категория — отдельный сегмент, цвет
+ * совпадает с цветом её иконки для визуальной связности.
+ */
+function buildPieChartSvg(items) {
+  if (!items.length) return '';
+
+  var total = items.reduce(function (s, i) { return s + i.amount; }, 0);
+  if (total <= 0) return '';
+
+  // Балансируем композицию: без пересортировки крупные секторы могли
+  // оказаться рядом друг с другом в одной дуге, визуально перевешивая
+  // картинку в одну сторону.
+  var sorted = items.slice().sort(function (a, b) { return b.amount - a.amount; });
+  var left = [], right = [];
+  sorted.forEach(function (item, i) { (i % 2 === 0 ? right : left).push(item); });
+  var balanced = left.reverse().concat(right);
+
+  var size = 168, r = 62, cx = size / 2, cy = size / 2;
+  var circumference = 2 * Math.PI * r;
+  var offset = 0;
+
+  var circles = '';
+
+  balanced.forEach(function (item) {
+    var meta = categoryMeta(item.categoryName);
+    var fraction = item.amount / total;
+    var dash = fraction * circumference;
+    var percent = Math.round(fraction * 100);
+
+    circles += '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="none" stroke="' + meta.color + '" ' +
+      'stroke-width="34" stroke-dasharray="' + dash.toFixed(2) + ' ' + (circumference - dash).toFixed(2) + '" ' +
+      'stroke-dashoffset="' + (-offset).toFixed(2) + '" transform="rotate(-90 ' + cx + ' ' + cy + ')" ' +
+      'data-category-name="' + escapeHtml(item.categoryName) + '" data-percent="' + percent + '" style="touch-action: none;" />';
+
+    offset += dash;
+  });
+
+  // Легенда сбоку — топ-5 категорий списком.
+  var legendHtml = '<div class="pie-legend">' + sorted.slice(0, 5).map(function (item) {
+    var meta = categoryMeta(item.categoryName);
+    var percent = Math.round(item.amount / total * 100);
+    return '<div class="pie-legend-item">' +
+      '<span class="pie-legend-dot" style="background:' + meta.color + ';"></span>' +
+      '<span class="pie-legend-percent">' + percent + '%</span>' +
+      '<span class="pie-legend-name">' + escapeHtml(item.categoryName) + '</span>' +
+    '</div>';
+  }).join('') + '</div>';
+
+  return '<svg viewBox="0 0 ' + size + ' ' + size + '">' + circles + '</svg>' + legendHtml;
+}
+
+/**
+ * Подсказка при удержании пальца/курсора на секторе диаграммы.
+ * Отслеживает не только точку нажатия, но и перемещение пальца по
+ * диаграмме, пока он удерживается — подсказка переключается на сектор
+ * под текущим положением через elementFromPoint.
+ */
+var pieTooltipActive = false;
+
+function attachPieTooltip(container) {
+  var tooltip = document.getElementById('pie-tooltip');
+  var svg = container.querySelector('svg');
+  if (!svg) return;
+
+  function showAt(clientX, clientY) {
+    var el = document.elementFromPoint(clientX, clientY);
+    if (!el || !el.hasAttribute('data-category-name')) { hide(); return; }
+    var name = el.getAttribute('data-category-name');
+    var percent = el.getAttribute('data-percent');
+    var containerRect = container.getBoundingClientRect();
+    var localX = clientX - containerRect.left;
+    var localY = clientY - containerRect.top;
+    tooltip.textContent = name + ' · ' + percent + '%';
+    tooltip.classList.add('visible');
+
+    var tipHeight = tooltip.offsetHeight || 28;
+    var gap = 10;
+    if (localY - gap - tipHeight < 4) {
+      // Недостаточно места сверху (диаграмма у самой верхней границы попапа) —
+      // показываем тултип под точкой касания, а не над ней.
+      tooltip.style.top = (localY + gap) + 'px';
+      tooltip.style.transform = 'translate(-50%, 0)';
+    } else {
+      tooltip.style.top = (localY - gap) + 'px';
+      tooltip.style.transform = 'translate(-50%, -100%)';
+    }
+    tooltip.style.left = localX + 'px';
+  }
+  function hide() {
+    tooltip.classList.remove('visible');
+    pieTooltipActive = false;
+  }
+
+  function onDown(e) {
+    pieTooltipActive = true;
+    var p = e.touches ? e.touches[0] : e;
+    showAt(p.clientX, p.clientY);
+  }
+  function onMove(e) {
+    if (!pieTooltipActive) return;
+    var p = e.touches ? e.touches[0] : e;
+    showAt(p.clientX, p.clientY);
+  }
+
+  svg.addEventListener('mousedown', onDown);
+  svg.addEventListener('touchstart', onDown, { passive: true });
+  svg.addEventListener('mousemove', onMove);
+  svg.addEventListener('touchmove', onMove, { passive: true });
+  ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(function (ev) {
+    svg.addEventListener(ev, hide);
+  });
+}
+
+function isScreenActive(name) {
+  var el = document.getElementById('screen-' + name);
+  return !!el && el.classList.contains('active');
+}
+
+function renderAll(animateDashboard) {
+  if (isScreenActive('dashboard')) {
+    renderDashboard(animateDashboard);
+  }
+  if (isScreenActive('history')) { renderHistory(); historyDirty = false; } else { historyDirty = true; }
 }
 
 function rebuildCategoryNames() {
   state.categoryNames = {};
-  state.categories.expense.concat(state.categories.income).forEach(function (c) {
-    state.categoryNames[c.id] = c.name;
-  });
+  state.categories.expense.concat(state.categories.income).forEach(function (c) { state.categoryNames[c.id] = c.name; });
 }
 
 function showToast(message, isError) {
@@ -779,12 +1427,13 @@ function showToast(message, isError) {
   el.__timer = setTimeout(function () { el.className = 'toast'; }, 3000);
 }
 
-function setStale(isStale) {
-  document.getElementById('stale-hint').style.display = isStale ? 'block' : 'none';
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 /* ------------------------------------------------------------------ */
-/* Навигация                                                           */
+/* Навигация по табам                                                     */
 /* ------------------------------------------------------------------ */
 
 document.querySelectorAll('.tab-btn[data-screen]').forEach(function (btn) {
@@ -794,90 +1443,413 @@ document.querySelectorAll('.tab-btn[data-screen]').forEach(function (btn) {
     btn.classList.add('active');
     document.querySelectorAll('.screen').forEach(function (s) { s.classList.remove('active'); });
     document.getElementById('screen-' + target).classList.add('active');
-  });
-});
-
-document.querySelectorAll('#period-selector button').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    document.querySelectorAll('#period-selector button').forEach(function (b) { b.classList.remove('active'); });
-    btn.classList.add('active');
-    state.currentPeriod = btn.getAttribute('data-period');
-    renderDashboard(); // локально, мгновенно, без запроса
+    if (target === 'history') {
+      if (historyDirty) { renderHistory(); historyDirty = false; }
+    }
+    if (target === 'dashboard') { renderDashboard(false); }
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* Форма добавления                                                    */
+/* Скролл-пикер периода: центр — "под лупой", плавный снап                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Переиспользуемый горизонтальный скролл-пикер со снапом и эффектом
+ * "лупы" (центральный пункт крупнее и ярче). Используется и для периода
+ * на дашборде, и для выбора даты в форме — общая механика, разные данные.
+ *
+ * onSettle(activeEl) вызывается, когда скролл окончательно остановился
+ * на каком-то пункте (после debounce), не на каждый кадр скролла.
+ */
+function createScrollPicker(container, onSettle, opts) {
+  var items = Array.prototype.slice.call(container.querySelectorAll('.period-item'));
+  var magnify = !opts || opts.magnify !== false;
+  var ticking = false;
+  var settleTimer = null;
+
+  function updateMagnifier() {
+    var containerRect = container.getBoundingClientRect();
+    var centerX = containerRect.left + containerRect.width / 2;
+    var closest = null, closestDist = Infinity;
+
+    items.forEach(function (item) {
+      var r = item.getBoundingClientRect();
+      var itemCenter = r.left + r.width / 2;
+      var dist = Math.abs(itemCenter - centerX);
+      if (magnify) {
+        var norm = Math.min(1, dist / (containerRect.width / 2));
+        var scale = 1 - norm * 0.32;
+        var opacity = 1 - norm * 0.62;
+        item.style.transform = 'scale(' + scale.toFixed(3) + ')';
+        item.style.opacity = opacity.toFixed(3);
+      }
+      if (dist < closestDist) { closestDist = dist; closest = item; }
+    });
+
+    items.forEach(function (item) { item.classList.toggle('active', item === closest); });
+    return closest;
+  }
+
+  container.addEventListener('scroll', function () {
+    if (!ticking) {
+      requestAnimationFrame(function () { updateMagnifier(); ticking = false; });
+      ticking = true;
+    }
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(function () {
+      var active = updateMagnifier();
+      if (active) onSettle(active);
+    }, 120);
+  });
+
+  items.forEach(function (item) {
+    item.addEventListener('click', function () {
+      item.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+    });
+  });
+
+  function scrollToItem(predicate, smooth) {
+    var item = items.filter(predicate)[0];
+    if (!item) return;
+    // offsetLeft — координата относительно самого контейнера (layout-based),
+    // не зависит от текущей прокрутки. getBoundingClientRect() же зависит от
+    // viewport и может "гонять" с нативным CSS scroll-snap браузера, из-за
+    // чего расчёт через scrollBy(relative) иногда промахивался мимо нужного
+    // элемента на первый рендер.
+    var target = item.offsetLeft + item.offsetWidth / 2 - container.clientWidth / 2;
+    if (smooth) {
+      container.scrollTo({ left: target, behavior: 'smooth' });
+    } else {
+      container.scrollLeft = target;
+    }
+  }
+
+  return { updateMagnifier: updateMagnifier, scrollToItem: scrollToItem, items: items };
+}
+
+var periodPicker = createScrollPicker(document.getElementById('period-scroll'), function (active) {
+  var key = active.getAttribute('data-period');
+  if (key !== state.currentPeriod) {
+    state.currentPeriod = key;
+    renderDashboard(true);
+    renderTrendChart();
+  }
+});
+
+function scrollToPeriod(key, smooth) {
+  periodPicker.scrollToItem(function (i) { return i.getAttribute('data-period') === key; }, smooth);
+}
+
+/* ------------------------------------------------------------------ */
+/* Попап "Баланс за период" — независимый от главного пикера периода    */
+/* ------------------------------------------------------------------ */
+
+var balancePopupPeriod = 'month';
+
+/** Уменьшает шрифт элемента, пока текст не перестанет вмещаться в ширину
+    родителя (без переноса строки) — по умолчанию должны влезать суммы
+    порядка сотен тысяч на экране iPhone. */
+function fitBalanceFont(el, maxSize, minSize) {
+  var container = el.parentElement;
+  var size = maxSize;
+  el.style.fontSize = size + 'px';
+  while (el.scrollWidth > container.clientWidth && size > minSize) {
+    size -= 1;
+    el.style.fontSize = size + 'px';
+  }
+}
+
+function renderBalancePopupBalance(periodKey) {
+  var income = 0, expenses = 0;
+  var byCategory = {}; // category_id -> { categoryName, type, amount }
+
+  function addTx(t) {
+    if (t.__failed) return;
+    var amount = Number(t.amount) || 0;
+    if (t.type === 'income') income += amount; else expenses += amount;
+    var key = t.category_id;
+    if (!byCategory[key]) byCategory[key] = { categoryName: state.categoryNames[key] || key, type: t.type, amount: 0 };
+    byCategory[key].amount += amount;
+  }
+
+  if (periodKey === 'all') {
+    // "Всё время" — без фильтра по дате, единственный особый период здесь.
+    state.transactions.forEach(addTx);
+  } else {
+    var range = resolvePeriod(periodKey);
+    state.transactions.forEach(function (t) {
+      if (t.__failed) return;
+      if (t.operation_date < range.startDate || t.operation_date > range.endDate) return;
+      addTx(t);
+    });
+  }
+
+  var balEl = document.getElementById('popup-period-balance');
+  var value = round2(income - expenses);
+  balEl.classList.toggle('negative', value < 0);
+  balEl.innerHTML = formatNumber(value);
+  fitBalanceFont(balEl, 36, 22);
+  document.getElementById('popup-period-income').innerHTML = formatNumber(round2(income));
+  document.getElementById('popup-period-expense').innerHTML = formatNumber(round2(expenses));
+
+  var breakdownList = document.getElementById('popup-period-breakdown');
+  var categories = Object.keys(byCategory).map(function (k) { return byCategory[k]; })
+    .filter(function (item) { return item.type === state.popupBreakdownType; })
+    .sort(function (a, b) { return b.amount - a.amount; });
+  if (!categories.length) {
+    breakdownList.innerHTML = '<div class="empty-state">Нет операций за этот период</div>';
+  } else {
+    breakdownList.innerHTML = categories.map(function (item) {
+      var isIncome = item.type === 'income';
+      return '<div class="row"><div class="row-left">' +
+        categoryIconHtml(item.categoryName) +
+        '<div class="row-text"><div class="row-title">' + escapeHtml(item.categoryName) + '</div></div>' +
+        '</div><div class="row-amount ' + (isIncome ? 'income' : 'expense') + '">' +
+        (isIncome ? '+' : '\u2212') + formatNumber(round2(item.amount)) + '</div></div>';
+    }).join('');
+    createIconsIn(breakdownList);
+  }
+}
+
+var balancePopupPicker = createScrollPicker(document.getElementById('popup-period-scroll'), function (active) {
+  var key = active.getAttribute('data-period');
+  if (key !== balancePopupPeriod) {
+    balancePopupPeriod = key;
+    renderBalancePopupBalance(key);
+  }
+});
+
+document.getElementById('period-summary-card').addEventListener('click', function () {
+  document.getElementById('balance-period-popup-overlay').classList.add('open');
+  balancePopupPeriod = 'month'; // всегда открываем с "Месяц" по умолчанию
+  state.popupBreakdownType = 'expense';
+  document.querySelectorAll('#popup-breakdown-type-toggle .chip').forEach(function (c) {
+    c.classList.toggle('selected', c.getAttribute('data-breakdown-type') === 'expense');
+  });
+  renderBalancePopupBalance(balancePopupPeriod);
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      balancePopupPicker.scrollToItem(function (i) { return i.getAttribute('data-period') === balancePopupPeriod; }, false);
+      balancePopupPicker.updateMagnifier();
+    });
+  });
+});
+
+document.querySelectorAll('#popup-breakdown-type-toggle .chip').forEach(function (chip) {
+  chip.addEventListener('click', function () {
+    document.querySelectorAll('#popup-breakdown-type-toggle .chip').forEach(function (c) { c.classList.remove('selected'); });
+    chip.classList.add('selected');
+    state.popupBreakdownType = chip.getAttribute('data-breakdown-type');
+    renderBalancePopupBalance(balancePopupPeriod);
+  });
+});
+
+document.getElementById('btn-close-balance-popup').addEventListener('click', function () {
+  document.getElementById('balance-period-popup-overlay').classList.remove('open');
+});
+
+makeSheetSwipeable(
+  document.querySelector('#balance-period-popup-overlay .sheet'),
+  document.querySelector('#balance-period-popup-overlay .sheet-handle'),
+  function () { document.getElementById('balance-period-popup-overlay').classList.remove('open'); }
+);
+
+/* ------------------------------------------------------------------ */
+/* Форма добавления / редактирования                                     */
 /* ------------------------------------------------------------------ */
 
 var sheetOverlay = document.getElementById('sheet-overlay');
+var amountInput = document.getElementById('input-amount');
 
-document.getElementById('btn-open-add').addEventListener('click', openAddSheet);
-document.getElementById('btn-cancel-sheet').addEventListener('click', closeSheet);
-sheetOverlay.addEventListener('click', function (e) {
-  if (e.target === sheetOverlay) closeSheet();
+amountInput.addEventListener('input', function () {
+  var cursorFromEnd = amountInput.value.length - amountInput.selectionStart;
+  amountInput.value = formatAmountInput(amountInput.value);
+  var pos = amountInput.value.length - cursorFromEnd;
+  amountInput.setSelectionRange(pos, pos);
 });
 
-function openAddSheet() {
-  state.selectedCategoryId = null;
-  state.selectedDateMode = 'today';
-  state.currentType = 'expense';
+document.getElementById('btn-open-add').addEventListener('click', function () { openAddSheet(); });
+document.getElementById('btn-cancel-sheet').addEventListener('click', closeSheet);
+sheetOverlay.addEventListener('click', function (e) { if (e.target === sheetOverlay) closeSheet(); });
 
-  document.getElementById('input-amount').value = '';
-  document.getElementById('input-comment').value = '';
-  document.getElementById('sheet-error').classList.remove('visible');
-  document.getElementById('input-custom-date').style.display = 'none';
-
-  setSegmentActive('#date-selector', 'data-date-mode', 'today');
-  setSegmentActive('#type-selector', 'data-type', 'expense');
-
-  renderCategoryChips();
-  sheetOverlay.classList.add('open');
-}
-
-function closeSheet() { sheetOverlay.classList.remove('open'); }
-
-function setSegmentActive(selector, attr, value) {
-  document.querySelectorAll(selector + ' button').forEach(function (b) {
-    b.classList.toggle('active', b.getAttribute(attr) === value);
-  });
-}
-
-document.querySelectorAll('#type-selector button').forEach(function (btn) {
+document.querySelectorAll('#type-selector-chips .chip').forEach(function (btn) {
   btn.addEventListener('click', function () {
-    setSegmentActive('#type-selector', 'data-type', btn.getAttribute('data-type'));
+    document.querySelectorAll('#type-selector-chips .chip').forEach(function (b) { b.classList.remove('selected'); });
+    btn.classList.add('selected');
     state.currentType = btn.getAttribute('data-type');
     state.selectedCategoryId = null;
     renderCategoryChips();
   });
 });
 
-document.querySelectorAll('#date-selector button').forEach(function (btn) {
-  btn.addEventListener('click', function () {
-    var mode = btn.getAttribute('data-date-mode');
-    setSegmentActive('#date-selector', 'data-date-mode', mode);
-    state.selectedDateMode = mode;
-    document.getElementById('input-custom-date').style.display = mode === 'custom' ? 'block' : 'none';
-  });
-});
+/**
+ * Скролл-пикер даты (та же механика, что у периода): последние 10 дней
+ * + пункт "Другая" для произвольной даты через нативный date-input.
+ */
+function generateDateScrollItems(extraDate) {
+  var today = state.serverToday || new Date().toISOString().slice(0, 10);
+  var todayParts = today.split('-').map(Number);
 
-/** Категории уже в памяти после bootstrap — запрос не нужен. */
+  // Фиксированный набор: позавчера..завтра, хронологический порядок.
+  var offsets = [-2, -1, 0, 1];
+  var labels = ['Позавчера', 'Вчера', 'Сегодня', 'Завтра'];
+  var dates = offsets.map(function (offset) {
+    var d = new Date(Date.UTC(todayParts[0], todayParts[1] - 1, todayParts[2]) + offset * 86400000);
+    return d.toISOString().slice(0, 10);
+  });
+
+  // При редактировании операции с датой за пределами этого диапазона —
+  // добавляем её отдельным пунктом, чтобы пикер мог на неё встать.
+  var extraHtml = '';
+  if (extraDate && dates.indexOf(extraDate) === -1) {
+    var p = extraDate.split('-');
+    extraHtml = '<div class="period-item plain" data-date-value="' + extraDate + '">' + p[2] + '.' + p[1] + '</div>';
+  }
+
+  var html = dates.map(function (dateStr, i) {
+    return '<div class="period-item plain" data-date-value="' + dateStr + '">' + labels[i] + '</div>';
+  }).join('') + extraHtml + '<div class="period-item plain" data-date-value="custom">Другая</div>';
+
+  document.getElementById('date-scroll').innerHTML = html;
+}
+
+var datePicker = null;
+
+function initDatePicker() {
+  datePicker = createScrollPicker(document.getElementById('date-scroll'), function (active) {
+    var val = active.getAttribute('data-date-value');
+    state.selectedDateValue = val;
+    document.getElementById('input-custom-date').style.display = val === 'custom' ? 'block' : 'none';
+  }, { magnify: false });
+}
+
+function scrollDatePickerTo(value, smooth) {
+  if (!datePicker) return;
+  datePicker.scrollToItem(function (i) { return i.getAttribute('data-date-value') === value; }, smooth);
+}
+
+function openAddSheet() {
+  state.editingTransactionId = null;
+  state.selectedCategoryId = null;
+  state.currentType = 'expense';
+
+  document.getElementById('sheet-title').textContent = 'Новая операция';
+  document.getElementById('btn-save-transaction').textContent = 'Сохранить';
+  document.getElementById('btn-delete-transaction').style.display = 'none';
+  amountInput.value = '';
+  document.getElementById('input-comment').value = '';
+  document.getElementById('sheet-error').classList.remove('visible');
+  document.getElementById('date-scroll').style.display = 'flex';
+  document.getElementById('input-custom-date').style.display = 'none';
+
+  setChipSelected('#type-selector-chips', 'data-type', 'expense');
+  generateDateScrollItems();
+  initDatePicker();
+  state.selectedDateValue = state.serverToday || new Date().toISOString().slice(0, 10);
+  renderCategoryChips();
+  sheetOverlay.classList.add('open');
+  requestAnimationFrame(function () {
+    requestAnimationFrame(function () {
+      scrollDatePickerTo(state.selectedDateValue, false);
+      datePicker.updateMagnifier();
+    });
+  });
+}
+
+function openEditSheet(transactionId) {
+  var t = state.transactions.filter(function (x) { return x.id === transactionId; })[0];
+  if (!t) return;
+  if (t.__pending) { showToast('Операция ещё сохраняется'); return; }
+
+  state.editingTransactionId = transactionId;
+  state.selectedCategoryId = t.category_id;
+  state.currentType = t.type;
+
+  document.getElementById('sheet-title').textContent = 'Изменить операцию';
+  document.getElementById('btn-save-transaction').textContent = 'Сохранить изменения';
+  document.getElementById('btn-delete-transaction').style.display = 'block';
+  amountInput.value = formatAmountInput(String(t.amount));
+  document.getElementById('input-comment').value = t.comment || '';
+  document.getElementById('sheet-error').classList.remove('visible');
+  document.getElementById('date-scroll').style.display = 'none';
+  document.getElementById('input-custom-date').style.display = 'block';
+  document.getElementById('input-custom-date').value = t.operation_date;
+  state.selectedDateValue = 'custom';
+
+  setChipSelected('#type-selector-chips', 'data-type', t.type);
+  renderCategoryChips();
+  sheetOverlay.classList.add('open');
+}
+
+function setChipSelected(containerSelector, attr, value) {
+  document.querySelectorAll(containerSelector + ' .chip').forEach(function (b) {
+    b.classList.toggle('selected', b.getAttribute(attr) === value);
+  });
+}
+
+function closeSheet() { sheetOverlay.classList.remove('open'); }
+
+/**
+ * Свайп вниз для закрытия шторки. Вешаем только на хендл/хедер (не на всю
+ * шторку) — иначе перетаскивание конфликтовало бы со скроллом контента
+ * внутри формы (категории, поля).
+ */
+function makeSheetSwipeable(sheetEl, dragZoneEl, onDismiss) {
+  var startY = null, deltaY = 0, dragging = false;
+
+  dragZoneEl.addEventListener('touchstart', function (e) {
+    startY = e.touches[0].clientY;
+    dragging = true;
+    sheetEl.style.transition = 'none';
+  }, { passive: true });
+
+  dragZoneEl.addEventListener('touchmove', function (e) {
+    if (!dragging) return;
+    deltaY = e.touches[0].clientY - startY;
+    if (deltaY > 0) sheetEl.style.transform = 'translateY(' + deltaY + 'px)';
+  }, { passive: true });
+
+  dragZoneEl.addEventListener('touchend', function () {
+    dragging = false;
+    sheetEl.style.transition = 'transform .2s ease';
+    if (deltaY > 90) {
+      onDismiss();
+    }
+    sheetEl.style.transform = '';
+    deltaY = 0;
+  });
+}
+
+makeSheetSwipeable(
+  document.querySelector('#sheet-overlay .sheet'),
+  document.querySelector('#sheet-overlay .sheet-handle'),
+  closeSheet
+);
+makeSheetSwipeable(
+  document.querySelector('#breakdown-popup-overlay .sheet'),
+  document.querySelector('#breakdown-popup-overlay .sheet-handle'),
+  function () { document.getElementById('breakdown-popup-overlay').classList.remove('open'); }
+);
+
 function renderCategoryChips() {
   var container = document.getElementById('category-chips');
   var list = state.categories[state.currentType] || [];
-
-  if (!list.length) {
-    container.innerHTML = state.loaded
-      ? '<div class="empty-state">Нет доступных категорий</div>'
-      : '<div class="skeleton-row" style="width:100%"></div>';
-    return;
-  }
+  if (!list.length) { container.innerHTML = '<div class="empty-state">Нет доступных категорий</div>'; return; }
 
   container.innerHTML = list.map(function (c) {
-    return '<button type="button" class="chip" data-category-id="' + escapeHtml(c.id) + '">' +
+    var meta = categoryMeta(c.name);
+    var isSelected = c.id === state.selectedCategoryId;
+    var sel = isSelected ? ' selected' : '';
+    var glow = isSelected
+      ? '0 0 6px ' + meta.color + ', 0 0 14px ' + meta.color + 'cc'
+      : '0 0 4px ' + meta.color + '88';
+    return '<button type="button" class="chip' + sel + '" data-category-id="' + c.id + '">' +
+      '<i data-lucide="' + meta.icon + '" style="color:' + meta.color + '; filter: drop-shadow(' + glow + ');"></i>' +
       escapeHtml(c.name) + '</button>';
   }).join('');
 
+  createIconsIn(container);
   container.querySelectorAll('.chip').forEach(function (chip) {
     chip.addEventListener('click', function () {
       container.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('selected'); });
@@ -887,36 +1859,38 @@ function renderCategoryChips() {
   });
 }
 
-/* ------------------------------------------------------------------ */
-/* Оптимистичное сохранение                                            */
-/* ------------------------------------------------------------------ */
-
 document.getElementById('btn-save-transaction').addEventListener('click', function () {
   var errorEl = document.getElementById('sheet-error');
   errorEl.classList.remove('visible');
 
-  var amount = document.getElementById('input-amount').value;
+  var amount = parseAmountInput(amountInput.value);
   var comment = document.getElementById('input-comment').value;
 
-  if (!amount || Number(amount) <= 0) return showFieldError('Укажите сумму больше нуля');
+  if (!amount || amount <= 0) return showFieldError('Укажите сумму больше нуля');
   if (!state.selectedCategoryId) return showFieldError('Выберите категорию');
 
   var date;
-  if (state.selectedDateMode === 'today') date = state.serverToday || 'today';
-  else if (state.selectedDateMode === 'yesterday') date = 'yesterday';
-  else {
+  if (state.selectedDateValue === 'custom') {
     date = document.getElementById('input-custom-date').value;
     if (!date) return showFieldError('Выберите дату');
+  } else {
+    date = state.selectedDateValue;
   }
 
-  saveTransactionOptimistic({
-    type: state.currentType,
-    categoryId: state.selectedCategoryId,
-    amount: Number(amount),
-    date: date,
-    comment: comment
-  });
+  if (state.editingTransactionId) {
+    updateTransactionOptimistic(state.editingTransactionId, {
+      type: state.currentType, categoryId: state.selectedCategoryId, amount: amount, date: date, comment: comment
+    });
+  } else {
+    saveTransactionOptimistic({ type: state.currentType, categoryId: state.selectedCategoryId, amount: amount, date: date, comment: comment });
+  }
+  closeSheet();
+});
 
+document.getElementById('btn-delete-transaction').addEventListener('click', function () {
+  if (!state.editingTransactionId) return;
+  if (!confirm('Удалить эту операцию?')) return;
+  cancelTransactionOptimistic(state.editingTransactionId);
   closeSheet();
 });
 
@@ -926,49 +1900,50 @@ function showFieldError(message) {
   el.classList.add('visible');
 }
 
-/**
- * Рисуем транзакцию сразу, запрос уходит в фон.
- *
- * clientId — идемпотентный ключ: если запрос уйдёт дважды (ретрай, слабая
- * сеть), сервер вернёт уже созданную запись вместо дубля. Пока ответа нет,
- * строка отображается приглушённой — пользователь видит, что она ещё в пути,
- * а не считает её подтверждённой.
- */
+/* ------------------------------------------------------------------ */
+/* Оптимистичные операции                                                */
+/* ------------------------------------------------------------------ */
+
 function saveTransactionOptimistic(input) {
   var clientId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-
   var optimistic = {
-    id: 't_' + clientId,
-    type: input.type,
-    category_id: input.categoryId,
-    amount: input.amount,
-    operation_date: resolveLocalDate(input.date),
-    comment: input.comment,
-    status: 'active',
-    __pending: true
+    id: 't_' + clientId, type: input.type, category_id: input.categoryId, amount: input.amount,
+    operation_date: resolveLocalDate(input.date), comment: input.comment, __pending: true
   };
-
   state.transactions.unshift(optimistic);
-  renderAll();
+  renderAll(false);
 
-  callServer('apiCreateTransaction', input.type, input.categoryId, input.amount,
-             input.date, input.comment, clientId)
+  callServer('apiCreateTransaction', input.type, input.categoryId, input.amount, input.date, input.comment, clientId)
     .then(function (saved) {
       var idx = findTxIndex(optimistic.id);
       if (idx !== -1) state.transactions[idx] = saved;
-      renderAll();
-      saveCache();
+      renderAll(false);
     })
-    .catch(function (err) {
+    .catch(function () {
       var idx = findTxIndex(optimistic.id);
-      if (idx !== -1) {
-        state.transactions[idx].__pending = false;
-        state.transactions[idx].__failed = true;
-      }
-      renderAll();
+      if (idx !== -1) { state.transactions[idx].__pending = false; state.transactions[idx].__failed = true; }
+      renderAll(false);
       showToast('Не удалось сохранить операцию', true);
-      console.error(err);
     });
+}
+
+function updateTransactionOptimistic(transactionId, fields) {
+  var idx = findTxIndex(transactionId);
+  if (idx === -1) return;
+  var previous = Object.assign({}, state.transactions[idx]);
+
+  state.transactions[idx].type = fields.type;
+  state.transactions[idx].category_id = fields.categoryId;
+  state.transactions[idx].amount = fields.amount;
+  state.transactions[idx].operation_date = resolveLocalDate(fields.date);
+  state.transactions[idx].comment = fields.comment;
+  renderAll(false);
+
+  callServer('apiUpdateTransaction', transactionId, fields).catch(function () {
+    state.transactions[idx] = previous;
+    renderAll(false);
+    showToast('Не удалось сохранить изменения', true);
+  });
 }
 
 function resolveLocalDate(date) {
@@ -982,96 +1957,59 @@ function resolveLocalDate(date) {
 }
 
 function findTxIndex(id) {
-  for (var i = 0; i < state.transactions.length; i++) {
-    if (state.transactions[i].id === id) return i;
-  }
+  for (var i = 0; i < state.transactions.length; i++) if (state.transactions[i].id === id) return i;
   return -1;
 }
 
-/** Отмена тоже оптимистична: строка исчезает сразу, при ошибке возвращается. */
 function cancelTransactionOptimistic(transactionId) {
   var idx = findTxIndex(transactionId);
   if (idx === -1) return;
-
   var removed = state.transactions[idx];
-  if (removed.__pending) {
-    showToast('Операция ещё сохраняется');
-    return;
-  }
-  if (!confirm('Отменить эту операцию?')) return;
-
   state.transactions.splice(idx, 1);
-  renderAll();
-  saveCache();
+  renderAll(false);
 
-  callServer('apiCancelTransaction', transactionId)
-    .catch(function (err) {
-      state.transactions.splice(idx, 0, removed);
-      renderAll();
-      saveCache();
-      showToast('Не удалось отменить операцию', true);
-      console.error(err);
-    });
+  callServer('apiCancelTransaction', transactionId).catch(function () {
+    state.transactions.splice(idx, 0, removed);
+    renderAll(false);
+    showToast('Не удалось удалить операцию', true);
+  });
 }
 
 /* ------------------------------------------------------------------ */
-/* Старт                                                               */
+/* Старт                                                                 */
 /* ------------------------------------------------------------------ */
 
-function showTelegramRequired(details) {
-  document.getElementById('app').innerHTML =
-    '<div style="padding-top:80px; text-align:center; color:var(--text-secondary); font-size:15px;">' +
-    'Откройте это приложение через Telegram.' +
-    (details ? '<div style="margin-top:14px; font-family:var(--font-mono); font-size:11px; color:var(--text-tertiary); padding:0 24px; word-break:break-all;">' + escapeHtml(details) + '</div>' : '') +
-    '</div>';
-  document.querySelector('.tabbar').style.display = 'none';
+function showAppError_(message) {
+  document.getElementById('app-error-text').textContent = message;
+  document.getElementById('app-error-screen').style.display = 'flex';
 }
 
 function initApp() {
-  var tg = (typeof Telegram !== 'undefined') && Telegram.WebApp;
-  if (!tg || !Telegram.WebApp.initData) {
-    showTelegramRequired();
+  if (window.Telegram && window.Telegram.WebApp) {
+    Telegram.WebApp.ready();
+    Telegram.WebApp.expand();
+  }
+
+  if (!getInitData_()) {
+    showAppError_('Откройте это приложение через кнопку в Telegram-боте — вне Telegram оно не может подтвердить, чей вы аккаунт.');
     return;
   }
 
-  Telegram.WebApp.ready();
-  Telegram.WebApp.expand();
-  TG_INIT_DATA = Telegram.WebApp.initData;
-
-  // 1. Мгновенно показываем прошлое состояние, если оно есть.
-  var cached = loadCache();
-  if (cached && cached.transactions) {
-    state.categories = cached.categories || { expense: [], income: [] };
-    state.transactions = cached.transactions;
-    state.serverToday = cached.serverToday;
+  callServer('apiBootstrap').then(function (data) {
+    state.categories = data.categories;
+    state.serverToday = data.serverToday;
     rebuildCategoryNames();
-    renderAll();
-    setStale(true);
-  }
-
-  // 2. Один запрос за актуальными данными.
-  callServer('apiBootstrap', state.currentPeriod)
-    .then(function (data) {
-      state.categories = data.categories;
-      state.serverToday = data.serverToday;
-      rebuildCategoryNames();
-
-      // Не затираем то, что ещё в полёте или упало.
-      var local = state.transactions.filter(function (t) { return t.__pending || t.__failed; });
-      state.transactions = local.concat(data.transactions);
-
-      state.loaded = true;
-      setStale(false);
-      renderAll();
-      renderCategoryChips();
-      saveCache();
-    })
-    .catch(function (err) {
-      setStale(false);
-      console.error('Bootstrap failed:', err);
-      if (!cached) showTelegramRequired(err.message);
-      else showToast('Не удалось обновить данные', true);
-    });
+    state.transactions = data.transactions;
+    state.loaded = true;
+    renderAll(false);
+    populateChartCategorySelect();
+    renderTrendChart();
+    scrollToPeriod(state.currentPeriod, false);
+    setTimeout(function () { periodPicker.updateMagnifier(); }, 50);
+  }).catch(function (err) {
+    showAppError_('Не удалось загрузить данные. Попробуйте закрыть и снова открыть приложение.' +
+      (err && err.message ? ' (' + err.message + ')' : ''));
+  });
 }
 
 initApp();
