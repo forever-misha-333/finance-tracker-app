@@ -417,6 +417,10 @@
   .history-filters select.text-input { flex: 0 0 auto; width: auto; padding-right: 34px; }
 
   .row.pending { opacity: 0.55; }
+  .stale-hint {
+    text-align: center; font-size: 11px; color: var(--text-tertiary);
+    padding: 10px 0 0 0; font-family: var(--font-mono);
+  }
   .row.failed { opacity: 1; }
   .row.failed .row-title::after { content: ' · не сохранено'; color: var(--expense); font-size: 12px; }
 
@@ -436,6 +440,22 @@
   .mb-12 { margin-bottom: 12px; }
   .mb-16 { margin-bottom: 16px; }
   .mb-20 { margin-bottom: 20px; }
+
+  /* --- Светлая тема Telegram: неон на белом нечитаем, свечения снимаем --- */
+  body[data-theme="light"] .balance-value,
+  body[data-theme="light"] .balance-value.negative,
+  body[data-theme="light"] .income-expense-value.income,
+  body[data-theme="light"] .income-expense-value.expense,
+  body[data-theme="light"] .period-item.active,
+  body[data-theme="light"] .chip.selected,
+  body[data-theme="light"] .row-amount.income,
+  body[data-theme="light"] .row-amount.expense {
+    text-shadow: none;
+  }
+  body[data-theme="light"] .row-icon i { filter: none !important; }
+  body[data-theme="light"] .bg-drift,
+  body[data-theme="light"] .bg-noise { opacity: 0; }
+  body[data-theme="light"] #history-chart-container svg { filter: none !important; }
 </style>
 
 </head>
@@ -460,6 +480,7 @@
           <div class="income-expense-value expense" id="dashboard-expense">···</div>
         </div>
       </div>
+      <div class="stale-hint" id="stale-hint" style="display:none;">обновляем…</div>
     </div>
 
     <div class="period-picker-card mb-16" id="period-picker-card" style="margin-bottom: 11px;">
@@ -690,6 +711,36 @@ function categoryIconHtml(name, size) {
  * обновить здесь, URL меняется.
  */
 var API_BASE_URL = 'https://script.google.com/macros/s/AKfycbyZ0YFZeiZXJ4JOfH714-Etdjdqq7MwOm3pzgI5Z-hGs2GWZscEr4bLS4Qnj8YtPpcC/exec';
+
+/* ------------------------------------------------------------------ */
+/* Кэш последнего состояния между запусками                             */
+/* ------------------------------------------------------------------ */
+
+var CACHE_KEY = 'ft_cache_v1';
+
+/** В кэш не попадают записи, которые ещё в полёте или упали. */
+function saveCache() {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({
+      categories: state.categories,
+      transactions: state.transactions.filter(function (t) { return !t.__pending && !t.__failed; }),
+      serverToday: state.serverToday,
+      savedAt: Date.now()
+    }));
+  } catch (e) { /* приватный режим или переполнение — не критично */ }
+}
+
+function loadCache() {
+  try {
+    var raw = localStorage.getItem(CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (e) { return null; }
+}
+
+function setStale(isStale) {
+  var el = document.getElementById('stale-hint');
+  if (el) el.style.display = isStale ? 'block' : 'none';
+}
 
 /**
  * Telegram передаёт initData через Telegram.WebApp — доступно только внутри
@@ -1057,29 +1108,63 @@ function populateChartCategorySelect() {
 
 var MONTH_NAMES_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
 
-function computeMonthlyTrend(type, categoryId) {
-  // Минимум — месяц. Расширяется только когда выбранный период крупнее
-  // месяца (полгода/год) — для Сегодня/Недели/Месяца/Квартала график не сужается.
-  var effectiveKey = (state.currentPeriod === 'half_year' || state.currentPeriod === 'year')
-    ? state.currentPeriod : 'month';
-  var periodRange = resolvePeriod(effectiveKey);
-  var byMonth = {};
+/** Сколько дней в периоде — определяет, по чему группировать график. */
+function periodLengthDays_(range) {
+  var s = range.startDate.split('-'), e = range.endDate.split('-');
+  var start = Date.UTC(+s[0], +s[1] - 1, +s[2]);
+  var end = Date.UTC(+e[0], +e[1] - 1, +e[2]);
+  return Math.round((end - start) / 86400000) + 1;
+}
+
+/**
+ * Динамика с гранулярностью по размеру периода: до ~40 дней — по дням,
+ * до ~120 — по неделям, дальше — по месяцам. Раньше группировка всегда была
+ * помесячной, поэтому на коротком периоде выходила одна точка и график
+ * заменялся заглушкой «нужно хотя бы 2 месяца» — теперь показываем всё,
+ * что вообще можно показать.
+ */
+function computeTrend(type, categoryId) {
+  var range = resolvePeriod(state.currentPeriod);
+  var days = periodLengthDays_(range);
+  var granularity = days <= 40 ? 'day' : (days <= 120 ? 'week' : 'month');
+
+  var buckets = {};
   state.transactions.forEach(function (t) {
     if (t.__failed) return;
     if (t.type !== type) return;
     if (categoryId !== 'all' && t.category_id !== categoryId) return;
-    if (t.operation_date < periodRange.startDate || t.operation_date > periodRange.endDate) return;
-    var monthKey = t.operation_date.slice(0, 7); // YYYY-MM
-    byMonth[monthKey] = (byMonth[monthKey] || 0) + Number(t.amount);
+    if (t.operation_date < range.startDate || t.operation_date > range.endDate) return;
+
+    var key;
+    if (granularity === 'day') {
+      key = t.operation_date;
+    } else if (granularity === 'week') {
+      var p = t.operation_date.split('-');
+      var parts = { year: +p[0], month: +p[1], day: +p[2] };
+      key = fmtCal_(addDaysCal_(parts, -(isoWeekday_(parts) - 1))); // понедельник недели
+    } else {
+      key = t.operation_date.slice(0, 7); // YYYY-MM
+    }
+    buckets[key] = (buckets[key] || 0) + Number(t.amount);
   });
 
-  var months = Object.keys(byMonth).sort();
-  // Последние 6 месяцев с данными — иначе на узком экране подписи налезают друг на друга.
-  months = months.slice(-6);
+  var keys = Object.keys(buckets).sort();
+  // Ограничиваем число точек — иначе подписи налезают друг на друга на узком экране.
+  keys = keys.slice(-8);
 
-  return months.map(function (key) {
-    var parts = key.split('-');
-    return { monthKey: key, label: MONTH_NAMES_SHORT[+parts[1] - 1], total: round2(byMonth[key]) };
+  return keys.map(function (key) {
+    var label;
+    if (granularity === 'day') {
+      var d = key.split('-');
+      label = +d[2] + '.' + d[1];
+    } else if (granularity === 'week') {
+      var w = key.split('-');
+      label = +w[2] + '.' + w[1];
+    } else {
+      var m = key.split('-');
+      label = MONTH_NAMES_SHORT[+m[1] - 1];
+    }
+    return { bucketKey: key, label: label, total: round2(buckets[key]) };
   });
 }
 
@@ -1097,14 +1182,10 @@ function buildSmoothLinePath(points) {
 
 function renderTrendChart() {
   var container = document.getElementById('history-chart-container');
-  var trend = computeMonthlyTrend(state.top7Type, chartState.categoryId);
+  var trend = computeTrend(state.top7Type, chartState.categoryId);
 
   if (trend.length === 0) {
     container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
-    return;
-  }
-  if (trend.length === 1) {
-    container.innerHTML = '<div class="empty-state">Недостаточно данных для графика — нужно хотя бы 2 месяца</div>';
     return;
   }
 
@@ -1114,7 +1195,8 @@ function renderTrendChart() {
   var minVal = 0;
 
   var points = trend.map(function (t, i) {
-    var x = padLeft + (i / (trend.length - 1)) * plotW;
+    // Единственную точку ставим по центру, иначе делим ширину поровну.
+    var x = trend.length === 1 ? padLeft + plotW / 2 : padLeft + (i / (trend.length - 1)) * plotW;
     var y = padTop + plotH - ((t.total - minVal) / (maxVal - minVal || 1)) * plotH;
     return { x: x, y: y, label: t.label, total: t.total };
   });
@@ -1918,6 +2000,7 @@ function saveTransactionOptimistic(input) {
       var idx = findTxIndex(optimistic.id);
       if (idx !== -1) state.transactions[idx] = saved;
       renderAll(false);
+      saveCache();
     })
     .catch(function () {
       var idx = findTxIndex(optimistic.id);
@@ -1938,10 +2021,12 @@ function updateTransactionOptimistic(transactionId, fields) {
   state.transactions[idx].operation_date = resolveLocalDate(fields.date);
   state.transactions[idx].comment = fields.comment;
   renderAll(false);
+  saveCache();
 
   callServer('apiUpdateTransaction', transactionId, fields).catch(function () {
     state.transactions[idx] = previous;
     renderAll(false);
+    saveCache();
     showToast('Не удалось сохранить изменения', true);
   });
 }
@@ -1967,10 +2052,12 @@ function cancelTransactionOptimistic(transactionId) {
   var removed = state.transactions[idx];
   state.transactions.splice(idx, 1);
   renderAll(false);
+  saveCache();
 
   callServer('apiCancelTransaction', transactionId).catch(function () {
     state.transactions.splice(idx, 0, removed);
     renderAll(false);
+    saveCache();
     showToast('Не удалось удалить операцию', true);
   });
 }
@@ -1984,10 +2071,65 @@ function showAppError_(message) {
   document.getElementById('app-error-screen').style.display = 'flex';
 }
 
+/* ------------------------------------------------------------------ */
+/* Адаптация под тему Telegram                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Тёмная тема — родная для этого дизайна (неон на графите), поэтому она
+ * остаётся дефолтной в CSS. Для светлой темы переопределяем переменные:
+ * неоновое свечение на белом фоне нечитаемо, поэтому акценты берём
+ * насыщенные, а не светящиеся.
+ */
+function applyTelegramTheme() {
+  var tg = window.Telegram && window.Telegram.WebApp;
+  var scheme = (tg && tg.colorScheme) || 'dark';
+  var root = document.documentElement;
+
+  if (scheme === 'light') {
+    root.style.setProperty('--bg', '#F2F4F3');
+    root.style.setProperty('--bg-elevated', '#FFFFFF');
+    root.style.setProperty('--card', '#FFFFFF');
+    root.style.setProperty('--card-elevated', '#F4F6F5');
+    root.style.setProperty('--border', '#D8DEDA');
+    root.style.setProperty('--divider', '#E6EAE8');
+
+    root.style.setProperty('--text-primary', '#121614');
+    root.style.setProperty('--text-secondary', '#5C6862');
+    root.style.setProperty('--text-tertiary', '#8A948F');
+
+    root.style.setProperty('--accent', '#0FA958');
+    root.style.setProperty('--accent-glow', 'rgba(15,169,88,0.14)');
+    root.style.setProperty('--accent-ink', '#FFFFFF');
+
+    root.style.setProperty('--income', '#0FA958');
+    root.style.setProperty('--income-soft', '#0B8043');
+    root.style.setProperty('--income-glow', 'rgba(15,169,88,0.14)');
+
+    root.style.setProperty('--expense', '#E02F4E');
+    root.style.setProperty('--expense-soft', '#B32340');
+    root.style.setProperty('--expense-glow', 'rgba(224,47,78,0.12)');
+  } else {
+    // Возврат к CSS-дефолтам (тёмная тема) — снимаем инлайн-переопределения.
+    ['--bg','--bg-elevated','--card','--card-elevated','--border','--divider',
+     '--text-primary','--text-secondary','--text-tertiary',
+     '--accent','--accent-glow','--accent-ink',
+     '--income','--income-soft','--income-glow',
+     '--expense','--expense-soft','--expense-glow'].forEach(function (v) {
+      root.style.removeProperty(v);
+    });
+  }
+
+  document.body.setAttribute('data-theme', scheme);
+}
+
 function initApp() {
   if (window.Telegram && window.Telegram.WebApp) {
     Telegram.WebApp.ready();
     Telegram.WebApp.expand();
+    applyTelegramTheme();
+    // Пользователь может переключить тему, не закрывая приложение.
+    Telegram.WebApp.onEvent('themeChanged', applyTelegramTheme);
   }
 
   if (!getInitData_()) {
@@ -1995,20 +2137,49 @@ function initApp() {
     return;
   }
 
-  callServer('apiBootstrap').then(function (data) {
-    state.categories = data.categories;
-    state.serverToday = data.serverToday;
+  // 1. Мгновенно показываем последнее известное состояние — приложение
+  //    выглядит загруженным сразу, ещё до ответа сервера.
+  var cached = loadCache();
+  if (cached && cached.transactions) {
+    state.categories = cached.categories || { expense: [], income: [] };
+    state.transactions = cached.transactions;
+    state.serverToday = cached.serverToday;
     rebuildCategoryNames();
-    state.transactions = data.transactions;
-    state.loaded = true;
     renderAll(false);
     populateChartCategorySelect();
     renderTrendChart();
     scrollToPeriod(state.currentPeriod, false);
     setTimeout(function () { periodPicker.updateMagnifier(); }, 50);
+    setStale(true);
+  }
+
+  // 2. Один запрос за актуальными данными, в фоне.
+  callServer('apiBootstrap').then(function (data) {
+    state.categories = data.categories;
+    state.serverToday = data.serverToday;
+    rebuildCategoryNames();
+
+    // Не затираем то, что ещё в полёте или упало.
+    var local = state.transactions.filter(function (t) { return t.__pending || t.__failed; });
+    state.transactions = local.concat(data.transactions);
+
+    state.loaded = true;
+    setStale(false);
+    renderAll(false);
+    populateChartCategorySelect();
+    renderTrendChart();
+    scrollToPeriod(state.currentPeriod, false);
+    setTimeout(function () { periodPicker.updateMagnifier(); }, 50);
+    saveCache();
   }).catch(function (err) {
-    showAppError_('Не удалось загрузить данные. Попробуйте закрыть и снова открыть приложение.' +
-      (err && err.message ? ' (' + err.message + ')' : ''));
+    setStale(false);
+    // Если кэш уже показан — приложение остаётся рабочим, просто сообщаем.
+    if (cached && cached.transactions) {
+      showToast('Не удалось обновить данные', true);
+    } else {
+      showAppError_('Не удалось загрузить данные. Попробуйте закрыть и снова открыть приложение.' +
+        (err && err.message ? ' (' + err.message + ')' : ''));
+    }
   });
 }
 
