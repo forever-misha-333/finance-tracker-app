@@ -376,6 +376,21 @@
     text-align: center; font-variant-numeric: tabular-nums;
   }
   .amount-input:focus { outline: none; border-color: var(--accent); }
+  /* Сумма — главный фокус первого экрана (§7.2): крупнее, чем в обычном
+     поле, полноширинная, с большой областью нажатия. */
+  .amount-input-primary { font-size: 40px; padding: 20px 14px; margin-top: 4px; }
+
+  /* Дата не должна визуально спорить с суммой (§7.3) — тихая строка под
+     ней, полноценный пикер открывается только по явному действию. */
+  .date-secondary-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 18px; font-family: var(--font-ui); font-size: 14px; color: var(--text-secondary);
+  }
+  .link-btn {
+    background: none; border: none; padding: 0; margin: 0; cursor: pointer;
+    font-family: var(--font-ui); font-size: 14px; color: var(--accent); font-weight: 500;
+  }
+  .link-btn-block { display: block; margin-top: 14px; }
 
   .text-input {
     width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box;
@@ -431,10 +446,37 @@
   .history-filters select.text-input { flex: 0 0 auto; width: auto; padding-right: 34px; }
 
   .row.pending { opacity: 0.55; }
-  .stale-hint {
-    text-align: center; font-size: 11px; color: var(--text-tertiary);
-    padding: 10px 0 0 0; font-family: var(--font-mono);
+
+  /* --- Карточка "идёт обновление". Уже (по горизонтали) остальных карточек —
+     боковые отступы вместо полной ширины, чтобы визуально не спорить с
+     основным контентом. Высота-обёртка анимируется через max-height: это
+     заставляет всё, что ниже (пикер периода, топ категорий), плавно
+     "отъезжать" вниз при появлении и наверх при исчезновении — обычным
+     потоком документа, без position:absolute и без JS-измерения высоты. */
+  .loading-card-wrap {
+    max-height: 0; opacity: 0; overflow: hidden;
+    margin: 0 10px 0 10px;
+    transition: max-height .38s cubic-bezier(.34,1.1,.4,1), opacity .22s ease, margin-bottom .38s cubic-bezier(.34,1.1,.4,1);
   }
+  .loading-card-wrap.visible { max-height: 64px; opacity: 1; margin-bottom: 16px; }
+  .loading-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card);
+    padding: 12px 16px;
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--font-ui); font-size: 13px; color: var(--text-secondary);
+    /* Появление самой карточки — лёгкий рост из центра, а не просто мгновенный показ. */
+    transform: scale(0.92); opacity: 0;
+    transition: transform .3s cubic-bezier(.34,1.4,.4,1), opacity .25s ease;
+    transition-delay: .05s;
+  }
+  .loading-card-wrap.visible .loading-card { transform: scale(1); opacity: 1; }
+  .loading-spinner {
+    width: 15px; height: 15px; border-radius: 50%; flex-shrink: 0;
+    border: 2px solid var(--border); border-top-color: var(--text-secondary);
+    animation: loading-spin .8s linear infinite;
+  }
+  @keyframes loading-spin { to { transform: rotate(360deg); } }
+
   .row.failed { opacity: 1; }
   .row.failed .row-title::after { content: ' · не сохранено'; color: var(--expense); font-size: 12px; }
 
@@ -489,7 +531,13 @@
           <div class="income-expense-value expense" id="dashboard-expense">···</div>
         </div>
       </div>
-      <div class="stale-hint" id="stale-hint" style="display:none;">обновляем…</div>
+    </div>
+
+    <div class="loading-card-wrap" id="loading-card-wrap">
+      <div class="loading-card">
+        <div class="loading-spinner"></div>
+        <span id="loading-card-text">Загрузка данных</span>
+      </div>
     </div>
 
     <div class="period-picker-card mb-16" id="period-picker-card" style="margin-bottom: 11px;">
@@ -576,28 +624,38 @@
     </div>
 
     <div class="sheet-scroll-area">
-      <div class="chip-grid mb-12" id="type-selector-chips">
-        <button type="button" class="chip selected" data-type="expense">Расход</button>
-        <button type="button" class="chip" data-type="income">Доход</button>
+      <div id="entry-stage1-group">
+        <div class="chip-grid mb-12" id="type-selector-chips">
+          <button type="button" class="chip selected" data-type="expense">Расход</button>
+          <button type="button" class="chip" data-type="income">Доход</button>
+        </div>
+
+        <input type="text" inputmode="decimal" class="amount-input amount-input-primary" id="input-amount" placeholder="0">
+
+        <div class="date-secondary-row" id="date-secondary-row">
+          <span id="date-secondary-text">Сегодня</span>
+          <button type="button" class="link-btn" id="btn-toggle-date-picker">Изменить дату</button>
+        </div>
+        <div id="date-picker-area" style="display:none;">
+          <div class="period-scroll" id="date-scroll" style="padding-top: 18px; padding-bottom: 4px;"></div>
+          <input type="date" class="text-input mb-12" id="input-custom-date" style="display:none; margin-top: 14px;">
+        </div>
       </div>
 
-      <label class="field-label">Дата</label>
-      <div class="period-scroll" id="date-scroll" style="padding-top: 18px; padding-bottom: 4px;"></div>
-      <input type="date" class="text-input mb-12" id="input-custom-date" style="display:none; margin-top: 14px;">
+      <div id="entry-stage2-group" style="display:none;">
+        <label class="field-label" id="category-field-label">Категория</label>
+        <div class="chip-grid" id="category-chips" style="flex: 1 1 auto; min-height: 90px; overflow-y: auto; align-content: flex-start;"></div>
 
-      <label class="field-label">Сумма</label>
-      <input type="text" inputmode="decimal" class="amount-input" id="input-amount" placeholder="0">
-
-      <label class="field-label">Категория</label>
-      <div class="chip-grid" id="category-chips" style="flex: 1 1 auto; min-height: 90px; overflow-y: auto; align-content: flex-start;"></div>
-
-      <input type="text" class="text-input" id="input-comment" placeholder="Комментарий" maxlength="500" style="margin-top: 16px;">
+        <button type="button" class="link-btn link-btn-block" id="btn-toggle-comment">Добавить комментарий</button>
+        <input type="text" class="text-input" id="input-comment" placeholder="Комментарий" maxlength="500" style="margin-top: 12px; display:none;">
+      </div>
 
       <div class="error-text" id="sheet-error"></div>
     </div>
 
     <div class="sheet-fixed-actions">
-      <button class="btn-primary" id="btn-save-transaction">Сохранить</button>
+      <button type="button" class="link-btn" id="btn-stage2-back" style="display:none; margin-bottom: 10px;">← Назад</button>
+      <button class="btn-primary" id="btn-save-transaction">Далее</button>
       <button class="btn-danger" id="btn-delete-transaction" style="display:none;">Удалить операцию</button>
     </div>
   </div>
@@ -747,8 +805,8 @@ function loadCache() {
 }
 
 function setStale(isStale) {
-  var el = document.getElementById('stale-hint');
-  if (el) el.style.display = isStale ? 'block' : 'none';
+  var el = document.getElementById('loading-card-wrap');
+  if (el) el.classList.toggle('visible', isStale);
 }
 
 /**
@@ -804,6 +862,9 @@ var state = {
   serverToday: null,
   loaded: false,
   editingTransactionId: null,
+  sheetMode: null,
+  commentModeActive: false,
+  savingLock: false,
   lastDashboardValues: { balance: 0, income: 0, expense: 0 },
   lastBreakdown: { expense: [], income: [] },
   top7Type: 'expense',
@@ -896,16 +957,94 @@ function resolvePeriod(key) {
  * никакой "тонкий" пробел не выглядит тонким. Возвращает HTML — вставлять
  * через innerHTML, не textContent.
  */
-function formatNumber(value, decimals, includeCurrency) {
-  var num = Number(value) || 0;
+/* ------------------------------------------------------------------ */
+/* Деньги: ОДИН источник правды.                                        */
+/*                                                                      */
+/* Разделитель разрядов существует в двух представлениях: <span class=  */
+/* "sep"> для innerHTML (даёт точный визуальный отступ) и настоящий      */
+/* символ шпации для textContent. Смешение этих двух представлений уже   */
+/* приводило к тому, что тег показывался пользователю как текст,        */
+/* поэтому выбор представления вынесен в ЯВНЫЙ аргумент функции, а не   */
+/* оставлен на усмотрение вызывающего кода.                             */
+/*                                                                      */
+/* formatNumber(...)      -> для innerHTML                              */
+/* formatNumberPlain(...) -> для textContent / value / атрибутов        */
+/* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* Тексты интерфейса — один источник правды (04-transaction-entry-ux.md  */
+/* §12.2). Часть строк намеренно совпадает с BOT_COPY в Bot.gs: там, где */
+/* пользователь видит одно и то же сообщение в боте и в приложении, оно  */
+/* обязано звучать одинаково. Это тексты, а не архитектурные константы — */
+/* менять их можно свободно, не трогая логику.                           */
+/* ------------------------------------------------------------------ */
+
+var UI_COPY = {
+  // Экраны шторки
+  SHEET_TITLE_NEW: 'Новая операция',
+  SHEET_TITLE_EDIT: 'Изменить операцию',
+  BTN_NEXT: 'Далее',
+  BTN_SAVE: 'Сохранить',
+  BTN_SAVE_EDIT: 'Сохранить изменения',
+  BTN_BACK: '\u2190 Назад',
+  BTN_DELETE: 'Удалить операцию',
+
+  // Дата и комментарий — вторичные действия
+  DATE_TODAY: 'Сегодня',
+  DATE_YESTERDAY: 'Вчера',
+  DATE_OTHER: 'Другая дата',
+  BTN_CHANGE_DATE: 'Изменить дату',
+  BTN_ADD_COMMENT: 'Добавить комментарий',
+  COMMENT_PLACEHOLDER: 'Комментарий',
+  LABEL_CATEGORY: 'Категория',
+
+  // Валидация — формулировки совпадают с ботом (COPY-004)
+  ERR_AMOUNT: 'Введите сумму, например 1250',
+  ERR_CATEGORY: 'Выберите категорию',
+  ERR_DATE: 'Выберите дату',
+
+  // Результаты операций
+  PENDING_TX: 'Операция ещё сохраняется',
+  ERR_SAVE: 'Не удалось сохранить операцию',
+  ERR_UPDATE: 'Не удалось сохранить изменения',
+  ERR_DELETE: 'Не удалось удалить операцию',
+  ERR_REFRESH: 'Не удалось обновить данные',
+  CONFIRM_DELETE: 'Удалить эту операцию?',
+
+  // Состояния загрузки и пустоты
+  LOADING: 'Загрузка данных',
+  EMPTY_PERIOD: 'Нет операций за этот период',
+  EMPTY_FILTER: 'Нет операций по этому фильтру',
+  EMPTY_NO_TX: 'Пока нет операций.<br>Нажмите + , чтобы добавить первую.',
+  EMPTY_NO_DATA: 'Нет данных за этот период',
+  APP_ERR_OUTSIDE_TG: 'Откройте это приложение через кнопку в Telegram-боте — вне Telegram оно не может подтвердить, чей вы аккаунт.',
+  APP_ERR_LOAD: 'Не удалось загрузить данные. Попробуйте закрыть и снова открыть приложение.'
+};
+
+var GROUP_SEPARATOR_HTML = '<span class="sep"></span>';
+var GROUP_SEPARATOR_TEXT = '\u2009'; // тонкая шпация
+
+function formatMoney_(value, decimals, includeCurrency, separator) {
+  var num = Number(value);
+  if (!isFinite(num)) num = 0; // NaN/Infinity никогда не должны дойти до экрана
   var isNeg = num < 0;
   num = Math.abs(num);
   var hasFraction = decimals !== undefined ? decimals > 0 : Math.round(num * 100) % 100 !== 0;
   var fixed = num.toFixed(hasFraction ? 2 : 0);
   var parts = fixed.split('.');
-  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, '<span class="sep"></span>');
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, separator);
   var suffix = includeCurrency === false ? '' : ' ₽';
   return (isNeg ? '\u2212' : '') + parts.join(',') + suffix;
+}
+
+/** Для вставки через innerHTML. */
+function formatNumber(value, decimals, includeCurrency) {
+  return formatMoney_(value, decimals, includeCurrency, GROUP_SEPARATOR_HTML);
+}
+
+/** Для textContent, value полей и атрибутов — без HTML-разметки. */
+function formatNumberPlain(value, decimals, includeCurrency) {
+  return formatMoney_(value, decimals, includeCurrency, GROUP_SEPARATOR_TEXT);
 }
 
 /** Живое форматирование поля ввода суммы по мере печати. */
@@ -919,8 +1058,22 @@ function formatAmountInput(raw) {
   return split.length > 1 ? grouped + '.' + split[1] : grouped;
 }
 
+/**
+ * Разбор суммы обратно в число.
+ *
+ * Снимаем ЛЮБЫЕ пробельные символы и разделители разрядов, а не только тот,
+ * которым форматировали: в проекте их два (\u200A в поле ввода, \u2009 в
+ * тексте), плюс пользователь может вставить сумму из буфера с обычным или
+ * неразрывным пробелом. Иначе Number() молча вернёт NaN или обрезанное
+ * число — именно этот класс ошибок здесь уже случался.
+ */
 function parseAmountInput(formatted) {
-  return Number(formatted.replace(new RegExp(THIN_SPACE, 'g'), ''));
+  var cleaned = String(formatted)
+    .replace(/[\s\u00A0\u2007\u2009\u200A\u202F]/g, '')
+    .replace(',', '.');
+  if (cleaned === '' || cleaned === '.') return NaN;
+  var n = Number(cleaned);
+  return isFinite(n) ? n : NaN;
 }
 
 /* ------------------------------------------------------------------ */
@@ -1012,7 +1165,7 @@ function renderBreakdownSection(containerId, items) {
   container.classList.add('breakdown-list');
 
   if (!items || !items.length) {
-    container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+    container.innerHTML = '<div class="empty-state">' + UI_COPY.EMPTY_NO_DATA + '</div>';
     return;
   }
 
@@ -1216,7 +1369,7 @@ function renderTrendChart() {
   var trend = computeTrend(state.top7Type, chartState.categoryId);
 
   if (trend.length === 0) {
-    container.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+    container.innerHTML = '<div class="empty-state">' + UI_COPY.EMPTY_NO_DATA + '</div>';
     return;
   }
 
@@ -1283,12 +1436,12 @@ function getFilteredHistoryTransactions() {
 function renderHistory() {
   var el = document.getElementById('history-container');
   if (!state.transactions.length) {
-    el.innerHTML = '<div class="empty-state">Пока нет операций.<br>Нажмите + , чтобы добавить первую.</div>';
+    el.innerHTML = '<div class="empty-state">' + UI_COPY.EMPTY_NO_TX + '</div>';
     return;
   }
   var list = getFilteredHistoryTransactions();
   if (!list.length) {
-    el.innerHTML = '<div class="empty-state">Нет операций по этому фильтру.</div>';
+    el.innerHTML = '<div class="empty-state">' + UI_COPY.EMPTY_FILTER + '</div>';
     return;
   }
 
@@ -1383,7 +1536,7 @@ function openBreakdownPopup(kind) {
   var total = items.reduce(function (s, i) { return s + i.amount; }, 0);
   var list = document.getElementById('breakdown-popup-list');
   if (!items.length) {
-    list.innerHTML = '<div class="empty-state">Нет данных за этот период</div>';
+    list.innerHTML = '<div class="empty-state">' + UI_COPY.EMPTY_NO_DATA + '</div>';
   } else {
     list.innerHTML = items.map(function (item) {
       var percent = total > 0 ? Math.round(item.amount / total * 100) : 0;
@@ -1720,7 +1873,7 @@ function renderBalancePopupBalance(periodKey) {
     .filter(function (item) { return item.type === state.popupBreakdownType; })
     .sort(function (a, b) { return b.amount - a.amount; });
   if (!categories.length) {
-    breakdownList.innerHTML = '<div class="empty-state">Нет операций за этот период</div>';
+    breakdownList.innerHTML = '<div class="empty-state">' + UI_COPY.EMPTY_PERIOD + '</div>';
   } else {
     breakdownList.innerHTML = categories.map(function (item) {
       var isIncome = item.type === 'income';
@@ -1801,9 +1954,131 @@ document.querySelectorAll('#type-selector-chips .chip').forEach(function (btn) {
     btn.classList.add('selected');
     state.currentType = btn.getAttribute('data-type');
     state.selectedCategoryId = null;
-    renderCategoryChips();
+    if (state.sheetMode === SHEET_MODE.EDIT) renderCategoryChips();
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* Два экрана внутри одной шторки (04-transaction-entry-ux.md §6-9).     */
+/* Редактирование существующей операции — единый экран (обе группы       */
+/* видны сразу): спека регулирует именно flow СОЗДАНИЯ, а не             */
+/* редактирование, где пользователю нужно видеть и менять всё сразу.     */
+/* ------------------------------------------------------------------ */
+
+var SHEET_MODE = { ADD_STAGE1: 'add1', ADD_STAGE2: 'add2', EDIT: 'edit' };
+
+function applySheetMode() {
+  var stage1 = document.getElementById('entry-stage1-group');
+  var stage2 = document.getElementById('entry-stage2-group');
+  var dateRow = document.getElementById('date-secondary-row');
+  var dateArea = document.getElementById('date-picker-area');
+  var commentToggle = document.getElementById('btn-toggle-comment');
+  var commentInput = document.getElementById('input-comment');
+  var backBtn = document.getElementById('btn-stage2-back');
+  var saveBtn = document.getElementById('btn-save-transaction');
+  var deleteBtn = document.getElementById('btn-delete-transaction');
+
+  if (state.sheetMode === SHEET_MODE.ADD_STAGE1) {
+    stage1.style.display = 'block';
+    stage2.style.display = 'none';
+    dateRow.style.display = 'flex';
+    backBtn.style.display = 'none';
+    saveBtn.textContent = UI_COPY.BTN_NEXT;
+    saveBtn.style.display = 'block';
+    deleteBtn.style.display = 'none';
+  } else if (state.sheetMode === SHEET_MODE.ADD_STAGE2) {
+    stage1.style.display = 'none';
+    stage2.style.display = 'block';
+    backBtn.style.display = 'block';
+    deleteBtn.style.display = 'none';
+    // Категория — коммит-действие (§8.2): тап сразу сохраняет, кнопка
+    // "Сохранить" нужна только если активирован необязательный комментарий
+    // (§8.3, "acceptable extended interaction: amount -> category -> add
+    // comment -> save").
+    saveBtn.textContent = UI_COPY.BTN_SAVE;
+    saveBtn.style.display = state.commentModeActive ? 'block' : 'none';
+  } else if (state.sheetMode === SHEET_MODE.EDIT) {
+    stage1.style.display = 'block';
+    stage2.style.display = 'block';
+    dateRow.style.display = 'none';
+    dateArea.style.display = 'block';
+    backBtn.style.display = 'none';
+    commentToggle.style.display = 'none';
+    commentInput.style.display = 'block';
+    saveBtn.textContent = UI_COPY.BTN_SAVE_EDIT;
+    saveBtn.style.display = 'block';
+    deleteBtn.style.display = 'block';
+  }
+}
+
+/** Сумма провалидирована — переходим ко второму экрану (§7.4). */
+function goToStage2() {
+  var amount = parseAmountInput(amountInput.value);
+  if (!amount || amount <= 0) return showFieldError(UI_COPY.ERR_AMOUNT);
+
+  state.sheetMode = SHEET_MODE.ADD_STAGE2;
+  state.commentModeActive = false;
+  document.getElementById('input-comment').value = '';
+  document.getElementById('input-comment').style.display = 'none';
+  document.getElementById('btn-toggle-comment').style.display = 'block';
+  document.getElementById('btn-toggle-comment').textContent = UI_COPY.BTN_ADD_COMMENT;
+  document.getElementById('sheet-error').classList.remove('visible');
+  renderCategoryChips();
+  applySheetMode();
+}
+
+document.getElementById('btn-stage2-back').addEventListener('click', function () {
+  state.sheetMode = SHEET_MODE.ADD_STAGE1;
+  applySheetMode();
+});
+
+document.getElementById('btn-toggle-date-picker').addEventListener('click', function () {
+  var area = document.getElementById('date-picker-area');
+  var isHidden = area.style.display === 'none';
+  area.style.display = isHidden ? 'block' : 'none';
+  if (isHidden) {
+    requestAnimationFrame(function () {
+      requestAnimationFrame(function () {
+        scrollDatePickerTo(state.selectedDateValue, false);
+        if (datePicker) datePicker.updateMagnifier();
+      });
+    });
+  }
+});
+
+document.getElementById('btn-toggle-comment').addEventListener('click', function () {
+  state.commentModeActive = true;
+  var input = document.getElementById('input-comment');
+  input.style.display = 'block';
+  input.focus();
+  this.style.display = 'none';
+  applySheetMode();
+});
+
+/** Текст под суммой ("Сегодня"/"Вчера"/дата) — обновляется при выборе даты. */
+function updateDateSecondaryText() {
+  var el = document.getElementById('date-secondary-text');
+  var v = state.selectedDateValue;
+
+  if (v === 'custom') {
+    var custom = document.getElementById('input-custom-date').value;
+    el.textContent = custom ? formatDateShort_(custom) : UI_COPY.DATE_OTHER;
+    return;
+  }
+
+  var today = state.serverToday || new Date().toISOString().slice(0, 10);
+  var tp = today.split('-').map(Number);
+  var yesterday = new Date(Date.UTC(tp[0], tp[1] - 1, tp[2]) - 86400000).toISOString().slice(0, 10);
+
+  if (v === today) { el.textContent = UI_COPY.DATE_TODAY; return; }
+  if (v === yesterday) { el.textContent = UI_COPY.DATE_YESTERDAY; return; }
+  el.textContent = formatDateShort_(v);
+}
+
+function formatDateShort_(iso) {
+  var p = String(iso).split('-');
+  return p.length === 3 ? p[2] + '.' + p[1] : iso;
+}
 
 /**
  * Скролл-пикер даты (та же механика, что у периода): последние 10 дней
@@ -1843,8 +2118,13 @@ function initDatePicker() {
     var val = active.getAttribute('data-date-value');
     state.selectedDateValue = val;
     document.getElementById('input-custom-date').style.display = val === 'custom' ? 'block' : 'none';
+    updateDateSecondaryText();
   }, { magnify: false });
 }
+
+document.getElementById('input-custom-date').addEventListener('change', function () {
+  updateDateSecondaryText();
+});
 
 function scrollDatePickerTo(value, smooth) {
   if (!datePicker) return;
@@ -1855,42 +2135,48 @@ function openAddSheet() {
   state.editingTransactionId = null;
   state.selectedCategoryId = null;
   state.currentType = 'expense';
+  state.sheetMode = SHEET_MODE.ADD_STAGE1;
+  state.commentModeActive = false;
+  state.savingLock = false;
 
-  document.getElementById('sheet-title').textContent = 'Новая операция';
-  document.getElementById('btn-save-transaction').textContent = 'Сохранить';
+  document.getElementById('sheet-title').textContent = UI_COPY.SHEET_TITLE_NEW;
   document.getElementById('btn-delete-transaction').style.display = 'none';
   amountInput.value = '';
   document.getElementById('input-comment').value = '';
+  document.getElementById('input-comment').style.display = 'none';
+  document.getElementById('btn-toggle-comment').textContent = UI_COPY.BTN_ADD_COMMENT;
   document.getElementById('sheet-error').classList.remove('visible');
   document.getElementById('date-scroll').style.display = 'flex';
   document.getElementById('input-custom-date').style.display = 'none';
+  document.getElementById('date-picker-area').style.display = 'none'; // дата свёрнута по умолчанию (§7.3)
 
   setChipSelected('#type-selector-chips', 'data-type', 'expense');
   generateDateScrollItems();
   initDatePicker();
   state.selectedDateValue = state.serverToday || new Date().toISOString().slice(0, 10);
-  renderCategoryChips();
+  updateDateSecondaryText();
+  applySheetMode();
   sheetOverlay.classList.add('open');
   requestAnimationFrame(function () {
-    requestAnimationFrame(function () {
-      scrollDatePickerTo(state.selectedDateValue, false);
-      datePicker.updateMagnifier();
-    });
+    scrollDatePickerTo(state.selectedDateValue, false);
+    // Сумма — главный фокус первого экрана (§7.2): ставим курсор сразу.
+    amountInput.focus();
   });
 }
 
 function openEditSheet(transactionId) {
   var t = state.transactions.filter(function (x) { return x.id === transactionId; })[0];
   if (!t) return;
-  if (t.__pending) { showToast('Операция ещё сохраняется'); return; }
+  if (t.__pending) { showToast(UI_COPY.PENDING_TX); return; }
 
   state.editingTransactionId = transactionId;
   state.selectedCategoryId = t.category_id;
   state.currentType = t.type;
+  state.sheetMode = SHEET_MODE.EDIT;
+  state.commentModeActive = false;
+  state.savingLock = false;
 
-  document.getElementById('sheet-title').textContent = 'Изменить операцию';
-  document.getElementById('btn-save-transaction').textContent = 'Сохранить изменения';
-  document.getElementById('btn-delete-transaction').style.display = 'block';
+  document.getElementById('sheet-title').textContent = UI_COPY.SHEET_TITLE_EDIT;
   amountInput.value = formatAmountInput(String(t.amount));
   document.getElementById('input-comment').value = t.comment || '';
   document.getElementById('sheet-error').classList.remove('visible');
@@ -1910,6 +2196,7 @@ function openEditSheet(transactionId) {
 
   setChipSelected('#type-selector-chips', 'data-type', t.type);
   renderCategoryChips();
+  applySheetMode();
   sheetOverlay.classList.add('open');
 }
 
@@ -1983,44 +2270,91 @@ function renderCategoryChips() {
   createIconsIn(container);
   container.querySelectorAll('.chip').forEach(function (chip) {
     chip.addEventListener('click', function () {
+      if (state.savingLock) return; // защита от повторного тапа (§16)
+
       container.querySelectorAll('.chip').forEach(function (c) { c.classList.remove('selected'); });
       chip.classList.add('selected');
       state.selectedCategoryId = chip.getAttribute('data-category-id');
+
+      // Категория — коммит-действие (§2.4, §8.2): тап сразу сохраняет,
+      // ЕСЛИ пользователь не активировал комментарий явно (§8.3). При
+      // редактировании тап только выбирает — сохраняет кнопка "Сохранить
+      // изменения".
+      if (state.sheetMode === SHEET_MODE.ADD_STAGE2 && !state.commentModeActive) {
+        commitAddTransaction();
+      }
     });
   });
 }
 
-document.getElementById('btn-save-transaction').addEventListener('click', function () {
+/** Дата из выбранного значения пикера/кастомного поля, с валидацией. */
+function resolveSelectedDate_() {
+  if (state.selectedDateValue === 'custom') {
+    return document.getElementById('input-custom-date').value || null;
+  }
+  return state.selectedDateValue;
+}
+
+/**
+ * Коммит создания — общая точка и для тапа по категории (без комментария),
+ * и для кнопки "Сохранить" (когда комментарий активирован). Блокировка
+ * savingLock защищает от двойного тапа/повторной отправки (§16) — снимается
+ * только при следующем открытии шторки.
+ */
+function commitAddTransaction() {
+  if (state.savingLock) return;
+
   var errorEl = document.getElementById('sheet-error');
   errorEl.classList.remove('visible');
 
   var amount = parseAmountInput(amountInput.value);
   var comment = document.getElementById('input-comment').value;
 
-  if (!amount || amount <= 0) return showFieldError('Укажите сумму больше нуля');
-  if (!state.selectedCategoryId) return showFieldError('Выберите категорию');
+  if (!amount || amount <= 0) return showFieldError(UI_COPY.ERR_AMOUNT);
+  if (!state.selectedCategoryId) return showFieldError(UI_COPY.ERR_CATEGORY);
+  var date = resolveSelectedDate_();
+  if (!date) return showFieldError(UI_COPY.ERR_DATE);
 
-  var date;
-  if (state.selectedDateValue === 'custom') {
-    date = document.getElementById('input-custom-date').value;
-    if (!date) return showFieldError('Выберите дату');
-  } else {
-    date = state.selectedDateValue;
+  state.savingLock = true;
+  saveTransactionOptimistic({ type: state.currentType, categoryId: state.selectedCategoryId, amount: amount, date: date, comment: comment });
+  closeSheet();
+}
+
+document.getElementById('btn-save-transaction').addEventListener('click', function () {
+  if (state.sheetMode === SHEET_MODE.ADD_STAGE1) {
+    return goToStage2();
   }
 
-  if (state.editingTransactionId) {
+  if (state.sheetMode === SHEET_MODE.ADD_STAGE2) {
+    // Кнопка видна только когда активирован комментарий (§8.3) — категория
+    // уже должна быть выбрана тапом по чипу.
+    return commitAddTransaction();
+  }
+
+  if (state.sheetMode === SHEET_MODE.EDIT) {
+    if (state.savingLock) return;
+    var errorEl = document.getElementById('sheet-error');
+    errorEl.classList.remove('visible');
+
+    var amount = parseAmountInput(amountInput.value);
+    var comment = document.getElementById('input-comment').value;
+    if (!amount || amount <= 0) return showFieldError(UI_COPY.ERR_AMOUNT);
+    if (!state.selectedCategoryId) return showFieldError(UI_COPY.ERR_CATEGORY);
+    var date = resolveSelectedDate_();
+    if (!date) return showFieldError(UI_COPY.ERR_DATE);
+
+    state.savingLock = true;
     updateTransactionOptimistic(state.editingTransactionId, {
       type: state.currentType, categoryId: state.selectedCategoryId, amount: amount, date: date, comment: comment
     });
-  } else {
-    saveTransactionOptimistic({ type: state.currentType, categoryId: state.selectedCategoryId, amount: amount, date: date, comment: comment });
+    closeSheet();
   }
-  closeSheet();
 });
 
 document.getElementById('btn-delete-transaction').addEventListener('click', function () {
-  if (!state.editingTransactionId) return;
-  if (!confirm('Удалить эту операцию?')) return;
+  if (!state.editingTransactionId || state.savingLock) return;
+  if (!confirm(UI_COPY.CONFIRM_DELETE)) return;
+  state.savingLock = true;
   cancelTransactionOptimistic(state.editingTransactionId);
   closeSheet();
 });
@@ -2035,6 +2369,13 @@ function showFieldError(message) {
 /* Оптимистичные операции                                                */
 /* ------------------------------------------------------------------ */
 
+function operationSummaryText_(type, amount, categoryId) {
+  var categoryName = state.categoryNames[categoryId] || categoryId;
+  var sign = type === 'income' ? '+' : '\u2212';
+  // Тост вставляется через textContent -> нужна plain-версия.
+  return sign + ' ' + formatNumberPlain(amount) + ' \u00B7 ' + categoryName;
+}
+
 function saveTransactionOptimistic(input) {
   var clientId = Date.now() + '_' + Math.random().toString(36).slice(2, 8);
   var optimistic = {
@@ -2043,6 +2384,7 @@ function saveTransactionOptimistic(input) {
   };
   state.transactions.unshift(optimistic);
   renderAll(false);
+  showToast(operationSummaryText_(input.type, input.amount, input.categoryId));
 
   callServer('apiCreateTransaction', input.type, input.categoryId, input.amount, input.date, input.comment, clientId)
     .then(function (saved) {
@@ -2055,7 +2397,7 @@ function saveTransactionOptimistic(input) {
       var idx = findTxIndex(optimistic.id);
       if (idx !== -1) { state.transactions[idx].__pending = false; state.transactions[idx].__failed = true; }
       renderAll(false);
-      showToast('Не удалось сохранить операцию', true);
+      showToast(UI_COPY.ERR_SAVE, true);
     });
 }
 
@@ -2076,7 +2418,7 @@ function updateTransactionOptimistic(transactionId, fields) {
     state.transactions[idx] = previous;
     renderAll(false);
     saveCache();
-    showToast('Не удалось сохранить изменения', true);
+    showToast(UI_COPY.ERR_UPDATE, true);
   });
 }
 
@@ -2107,7 +2449,7 @@ function cancelTransactionOptimistic(transactionId) {
     state.transactions.splice(idx, 0, removed);
     renderAll(false);
     saveCache();
-    showToast('Не удалось удалить операцию', true);
+    showToast(UI_COPY.ERR_DELETE, true);
   });
 }
 
@@ -2172,7 +2514,31 @@ function applyTelegramTheme() {
   document.body.setAttribute('data-theme', scheme);
 }
 
+/**
+ * Разметка содержит те же тексты, что и UI_COPY. Чтобы источник правды
+ * остался один, при старте проставляем их из UI_COPY: правка в одном месте
+ * гарантированно доезжает до экрана, а статический HTML служит лишь
+ * фолбэком, если скрипт почему-то не выполнился.
+ */
+function applyStaticCopy_() {
+  var map = {
+    'btn-toggle-date-picker': UI_COPY.BTN_CHANGE_DATE,
+    'category-field-label': UI_COPY.LABEL_CATEGORY,
+    'btn-toggle-comment': UI_COPY.BTN_ADD_COMMENT,
+    'btn-stage2-back': UI_COPY.BTN_BACK,
+    'btn-delete-transaction': UI_COPY.BTN_DELETE,
+    'loading-card-text': UI_COPY.LOADING
+  };
+  Object.keys(map).forEach(function (id) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = map[id];
+  });
+  var comment = document.getElementById('input-comment');
+  if (comment) comment.placeholder = UI_COPY.COMMENT_PLACEHOLDER;
+}
+
 function initApp() {
+  applyStaticCopy_();
   if (window.Telegram && window.Telegram.WebApp) {
     Telegram.WebApp.ready();
     Telegram.WebApp.expand();
@@ -2182,7 +2548,7 @@ function initApp() {
   }
 
   if (!getInitData_()) {
-    showAppError_('Откройте это приложение через кнопку в Telegram-боте — вне Telegram оно не может подтвердить, чей вы аккаунт.');
+    showAppError_(UI_COPY.APP_ERR_OUTSIDE_TG);
     return;
   }
 
@@ -2224,10 +2590,9 @@ function initApp() {
     setStale(false);
     // Если кэш уже показан — приложение остаётся рабочим, просто сообщаем.
     if (cached && cached.transactions) {
-      showToast('Не удалось обновить данные', true);
+      showToast(UI_COPY.ERR_REFRESH, true);
     } else {
-      showAppError_('Не удалось загрузить данные. Попробуйте закрыть и снова открыть приложение.' +
-        (err && err.message ? ' (' + err.message + ')' : ''));
+      showAppError_(UI_COPY.APP_ERR_LOAD);
     }
   });
 }
